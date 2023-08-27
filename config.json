@@ -1,0 +1,17 @@
+{
+  "reddit": {
+    "subreddit": "testingground4bots",
+    "limit": 500
+  },
+  "creds": {
+    "reddit_client_id": "XXX",
+    "reddit_client_secret": "XXX",
+    "reddit_user_agent": "XXX"
+  },
+  "GCS": {
+    "bucket": "XXX",
+    "timestamp_file_name": "last_timestamp.txt",
+    "comment_ids_todo_pkl_name": "comment_ids_todo.pkl",
+    "comment_ids_done_pkl_name": "comment_ids_done.pkl"
+  }
+}
