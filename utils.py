@@ -2,7 +2,7 @@ import argparse
 import json
 import logging
 import re
-
+from itertools import chain
 from rapidfuzz import process, fuzz
 
 # LOGGING AND CONFIG
@@ -44,10 +44,23 @@ def extract_braces(comment_body):
 def partial_ratio(s1, s2):
     return fuzz.partial_ratio(str.lower(s1), str.lower(s2))
 
-def top_k_matches_list(s, lst, k=3):
-    return process.extract(s, lst, scorer=fuzz.partial_ratio, limit=k)
+def top_k_matches_list(s, lst, k=3, func="partial", lateralize=True):
+    scorer=fuzz.partial_ratio
+    if func != "partial":
+        scorer=fuzz.ratio
+    if lateralize:
+        lst = [ss.ljust(len(s), '#') for ss in lst]
+    logging.info(f"Matching {s} with a list of len {len(lst)}")
+    return process.extract(s, lst, scorer=scorer, limit=k)
 
-def top_k_matches_dic(s, dic, keys, k=3):
-    return process.extract(s, sum([dic[key] for key in keys], []), scorer=fuzz.partial_ratio, limit=k)
+def top_k_matches_dic(s, dic, keys, k=3, func="partial", lateralize=True):
+    scorer=fuzz.partial_ratio
+    if func != "partial":
+        scorer=fuzz.ratio
+    lst = list(chain(*[dic[key] for key in keys]))
+    if lateralize:
+        lst = [ss.ljust(len(s), '#') for ss in lst]
+    logging.info(f"Matching {s} with a dic on keys : {keys} for a total title list of len {len(lst)}")
+    return process.extract(s, lst, scorer=scorer, limit=k)
 
 
