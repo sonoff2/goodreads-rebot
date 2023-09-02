@@ -1,15 +1,18 @@
 import praw_wrapper
 import bq
 import utils
+import logging
 from utils import config
+from formatter import Formatter
 
 class Reader:
 
     def __init__(self, config=config):
         self.reddit = praw_wrapper.init(config)
-        self.subreddit = self.reddit.subreddit(config['reddit']['subreddit'])
+        self.subreddit_str = config['reddit']['subreddit']
+        self.subreddit = self.reddit.subreddit(self.subreddit_str)
         self.limit = config['reddit']['limit']
-        self.last_timestamp = bq.get_last_timestamp(self.subreddit)
+        self.last_timestamp = bq.get_last_timestamp(self.subreddit_str)
         self.latest_comments = []
 
     def read_comments(self):
@@ -24,7 +27,7 @@ class Reader:
 
         if latest_comments:
             max_comment_timestamp = max(comment.created_utc for comment in latest_comments)
-            bq.update_timestamp(self.subreddit, max_comment_timestamp)
+            bq.update_timestamp(self.subreddit_str, max_comment_timestamp)
 
         return self
 
@@ -34,33 +37,35 @@ class Reader:
 
         if filtered_comments:
             # Store comment IDs in Firestore
-            comment_ids = [[self.subreddit, comment.id, comment.created_utc] for comment in filtered_comments]
+            comment_ids = [[self.subreddit_str, comment.id, comment.created_utc] for comment in filtered_comments]
             bq.save_comment_ids_to_match(comment_ids)
 
         return True
 
 
-class Poster:
+class Matcher:
 
     def __init__(self, config):
 
         # Matching part:
-        self.comment_ids = bq.get_comment_ids_to_match()
+        self.subreddit_str = config['reddit']['subreddit']
+        self.comment_ids = bq.get_comment_ids_to_match(subreddit=self.subreddit_str)
         self.books_by_author = bq.get_books_by_author()  # format = {« jk rowling »: [list…], etc}
         self.all_titles = bq.get_all_titles()  # format = list of book titles in DB
         self.series_titles = None  # get it only if needed
         self.min_ratio = config['matching']['min_ratio']
+        self.author_min_ratio = config['matching']['author_min_ratio']
 
         # Replying part:
         self.reddit = praw_wrapper.init(config)
-        self.subreddit_str = config['reddit']['subreddit']
+
 
     # FULL FLOW TO TREAT ONE POST
 
     def process_one_comment(self):
         comment_id = bq.get_comment_ids_to_match(self.subreddit_str)[0] # Most recent comment
         comment = self.reddit.comment(id=comment_id)
-        title_matches = self.match_titles(comment)
+        title_matches = self.match_titles(comment.body)
         reply_text = self.build_reply(title_matches)
         self.post_reply(comment, reply_text)
 
@@ -75,36 +80,50 @@ class Poster:
         ]
 
     def match_title(self, s):
-        title = None
+        title = [(None, 0)]
         if len(s) > 150:
-            return None  # parsing error
+            return [(None, 0)]  # parsing error
         s = str.lower(s.strip())
         if "by" in s: # Maybe the user provided the author:
             title = self.match_author(s)
-            if title is None: # But maybe it's the book title that contains "by"
+            if not self.title_is_valid(title): # But maybe it's the book title that contains "by"
                 title = self.match_titles_with_by(s)
-        if (title is None) or ("by" not in s): # If title was not found, do basic search
+                if not self.title_is_valid(title): # Or there is a mistake on author, lets drop it
+                    title = self.match_all(s.split(" by ")[0])
+        if (not self.title_is_valid(title)) or (" by " not in s): # If title was not found, do basic search
             title = self.match_all(s)
         return title
+
+    def title_is_valid(self, result):
+        try:
+            return result[0][1] > self.min_ratio
+        except:
+            print("Problem validating title result: ", result)
+            return False
 
     def match_author(self, s):
         s_split = s.rsplit(' by ', 1)
         # Last word of the string is supposedly the author last name:
         last_name = next(word for word in reversed(s_split[1].split()) if len(word) >= 2)
         # Get the closest authors in base (the user may have done a typo)
-        closest_authors = utils.top_k_matches_list(last_name, list(self.books_by_author.keys()), 3)
+        closest_authors = [x[0].rstrip("#") for x in
+            utils.top_k_matches_list(last_name, list(self.books_by_author.keys()), k=3, func='full')
+                           if x[1] > self.author_min_ratio]
         # Find the closest book title in their books:
-        top_books = utils.top_k_matches_dic(s_split[0], self.books_by_author, closest_authors, k=3)
-        return top_books[0][0] if top_books[0][1] > self.min_ratio else None
+        return utils.top_k_matches_dic(s_split[0], self.books_by_author, closest_authors, k=1, func="full")
 
     def match_titles_with_by(self, s):
-        return utils.top_k_matches_list(s, [title for title in self.all_titles if "by" in title], 3)
+        return utils.top_k_matches_list(s, [title for title in self.all_titles if "by" in title], 1, func="full")
 
     def match_all(self, s):
-        return utils.top_k_matches_list(s, self.all_titles, 3)
+        return utils.top_k_matches_list(s, self.all_titles, 1, func="full")
 
     def build_reply(self, title_matches):
-        return str(title_matches)
+        logging.info(f"Building the reply for all matches: {title_matches}")
+        reply = "\n\n".join([
+            Formatter(title_match=title_match[0], nth=i).format_all() for i, title_match in enumerate(title_matches)
+        ])
+        return reply
 
     def post_reply(self, comment, reply_text):
         try:
@@ -121,7 +140,7 @@ class Bot:
 
     def __init__(self, config):
         self.reader = Reader(config)
-        self.poster = Poster(config)
+        self.poster = Matcher(config)
 
     def run_crawling(self):
         self.reader.read_comments()
