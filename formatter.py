@@ -2,26 +2,31 @@ import bq
 import re
 import logging
 from utils import config
+import textwrap
 
 class Formatter:
-    def __init__(self, title_match, nth):
+    def __init__(self, title_match, nth, total):
         logging.info(f"Received title_match : {title_match}")
         self.title = str(title_match[0]).rstrip("#")
         self.nth = nth
+        self.total = total
         self.score = int(title_match[1])
+        self.is_series = title_match[3]
         if self.title is not None:
-            self.book_info = bq.get_book_info(self.title)
+            self.book_info = bq.get_book_info(self.title, self.is_series)
+            print(self.book_info)
 
     def format_link(self):
         title = self.book_info["title"]
         url = self.book_info["grlink"]
         nth = self.nth + 1
+        total = self.total
         score = self.score
 
         if score < config['matching']['min_ratio']:
-            return f"_Match #{nth} ({score}% = BAD) => '{title}' was ignored_"
+            return f"**#{nth}/{total}: Search Failed** _(Found [{title}]({url}) with bad matching score of {score}%)_"
         else:
-            return f"**Match #{nth} ({score}%): [{title}]({url})**"
+            return f"**#{nth}/{total}: [{title}]({url})** (Matching {score}%)"
 
     def format_header(self):
         pages = self.book_info["pages"]
@@ -34,9 +39,7 @@ class Formatter:
         description = self.book_info["summary"]
         if description is None:
             return ""
-        description = re.sub('<.*?>', '', description.replace("<br />", "\n"))
-        chunks = [">>" + chunk for chunk in description.split("\n") if len(chunk) > 2]
-        return "\n".join(chunks)
+        return textwrap.shorten(">" + description.replace('&gt;', ">"), width=750, placeholder=" (...)")
 
     def format_book_footer(self):
         n_sugg = self.book_info['n_sugg']
