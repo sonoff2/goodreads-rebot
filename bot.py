@@ -14,31 +14,44 @@ class Reader:
         self.limit = config['reddit']['limit']
         self.last_timestamp = bq.get_last_timestamp(self.subreddit_str)
         self.latest_comments = []
+        self.latest_submissions = []
 
-    def read_comments(self):
+    def read_posts(self):
         latest_comments = []
         for comment in self.subreddit.comments(limit=self.limit):
             if comment.created_utc >= self.last_timestamp:
                 latest_comments.append(comment)
             else:
                 break
-
         self.latest_comments = latest_comments
 
-        if latest_comments:
-            max_comment_timestamp = max(comment.created_utc for comment in latest_comments)
-            bq.update_timestamp(self.subreddit_str, max_comment_timestamp)
+        latest_submissions = []
+        for submission in self.subreddit.new(limit=self.limit):
+            if submission.created_utc >= self.last_timestamp:
+                latest_submissions.append(submission)
+            else:
+                break
+        self.latest_submissions = latest_submissions
+
+        if latest_submissions or latest_comments:
+            max_timestamp = max(post.created_utc for post in latest_comments + latest_submissions)
+            bq.update_timestamp(self.subreddit_str, max_timestamp)
 
         return self
 
-    def save_comments(self):
-        filtered_comments = [
-            comment for comment in self.latest_comments if "{{" in comment.body and "}}" in comment.body]
+    def save_posts(self):
+        filtered_comments = [comment for comment in self.latest_comments
+                             if "{{" in comment.body and "}}" in comment.body]
+        filtered_submissions = [submission for submission in self.latest_submissions
+                                if "{{" in submission.selftext and "}}" in submission.selftext]
 
-        if filtered_comments:
-            # Store comment IDs in Firestore
-            comment_ids = [[self.subreddit_str, comment.id, comment.created_utc] for comment in filtered_comments]
-            bq.save_comment_ids_to_match(comment_ids)
+        if filtered_comments or filtered_submissions:
+            # Store IDs to treat in Big Query
+            comment_ids = [[self.subreddit_str, comment.id, comment.created_utc, 'comment']
+                           for comment in filtered_comments]
+            submission_ids = [[self.subreddit_str, submission.id, submission.created_utc, 'submission']
+                              for submission in filtered_submissions]
+            bq.save_post_ids_to_match(comment_ids + submission_ids)
 
         return True
 
@@ -49,10 +62,10 @@ class Matcher:
 
         # Matching part:
         self.subreddit_str = config['reddit']['subreddit']
-        self.comment_ids = bq.get_comment_ids_to_match(subreddit=self.subreddit_str)
+        self.post_ids = bq.get_post_ids_to_match(subreddit=self.subreddit_str)
         self.books_by_author = bq.get_books_by_author()  # format = {« jk rowling »: [list…], etc}
         self.all_titles = bq.get_all_titles()  # format = list of book titles in DB
-        self.series_titles = None  # get it only if needed
+        self.series_titles = bq.get_series_titles()
         self.min_ratio = config['matching']['min_ratio']
         self.author_min_ratio = config['matching']['author_min_ratio']
 
@@ -62,12 +75,19 @@ class Matcher:
 
     # FULL FLOW TO TREAT ONE POST
 
-    def process_one_comment(self):
-        comment_id = bq.get_comment_ids_to_match(self.subreddit_str)[0] # Most recent comment
-        comment = self.reddit.comment(id=comment_id)
-        title_matches = self.match_titles(comment.body)
+    def process_one_post(self):
+        ids = bq.get_post_ids_to_match(self.subreddit_str)[0]
+        post_id, post_type = ids[0], ids[1] # Most recent comment
+        if post_type == "comment":
+            post = self.reddit.comment(id=post_id)
+            title_matches = self.match_titles(post.body)
+        elif post_type == "submission":
+            post = self.reddit.submission(id=post_id)
+            title_matches = self.match_titles(post.selftext)
+        else:
+            raise ValueError
         reply_text = self.build_reply(title_matches)
-        self.post_reply(comment, reply_text)
+        self.post_reply(post, reply_text)
 
     def match_titles(self, body):
         """
@@ -76,14 +96,20 @@ class Matcher:
         :return:
         """
         return [
-            self.match_title(s) for s in utils.extract_braces(body)
+            self.match_title(s) for s in utils.extract_braces(body)[0:10] # 10 matches max par post to avoid flood
         ]
 
     def match_title(self, s):
+
         title = [(None, 0)]
         if len(s) > 150:
-            return [(None, 0)]  # parsing error
+            return title  # parsing error
         s = str.lower(s.strip())
+
+        # Case 1 : Series
+        serie_title = self.match_series(s) # lookup series first
+
+        # Case 2 : not a Series
         if "by" in s: # Maybe the user provided the author:
             title = self.match_author(s)
             if not self.title_is_valid(title): # But maybe it's the book title that contains "by"
@@ -92,7 +118,16 @@ class Matcher:
                     title = self.match_all(s.split(" by ")[0])
         if (not self.title_is_valid(title)) or (" by " not in s): # If title was not found, do basic search
             title = self.match_all(s)
-        return title
+        # Not a series so False:
+        non_serie_title = [(*t, False) for t in title]
+
+        # Finally return the best match between Series or not
+        return  [max(serie_title + non_serie_title, key=lambda x: x[1])]
+
+    def match_series(self, s):
+        with_by = utils.top_k_matches_list(s.split(' by ')[0], self.series_titles, 1, func="full")
+        without_by = utils.top_k_matches_list(s, self.series_titles, 1, func="full")
+        return [(*max(with_by + without_by, key=lambda x: x[1]), True)] # True for "is_series"
 
     def title_is_valid(self, result):
         try:
@@ -121,17 +156,20 @@ class Matcher:
     def build_reply(self, title_matches):
         logging.info(f"Building the reply for all matches: {title_matches}")
         reply = "\n\n".join([
-            Formatter(title_match=title_match[0], nth=i).format_all() for i, title_match in enumerate(title_matches)
+            Formatter(title_match=title_match[0], nth=i, total=len(title_matches)).format_all()
+            for i, title_match in enumerate(title_matches)
         ])
         return reply
 
-    def post_reply(self, comment, reply_text):
+    def post_reply(self, post, reply_text):
         try:
-            posted_reply = comment.reply(reply_text)
+            logging.info(f"Answering the reply text : {reply_text}")
+            posted_reply = post.reply(reply_text)
 
             # If reply is successfully posted, remove the comment from Firestore
             if posted_reply:
-                bq.remove_comment_ids_to_match(ids=[comment.id])
+                pass
+                bq.remove_post_ids_to_match(ids=[post.id])
 
         except Exception as e:
             print(f"Error posting reply: {e}")
@@ -143,8 +181,8 @@ class Bot:
         self.poster = Matcher(config)
 
     def run_crawling(self):
-        self.reader.read_comments()
-        self.reader.save_comments()
+        self.reader.read_posts()
+        self.reader.save_posts()
 
     def match_and_reply_one(self):
-        self.poster.process_one_comment()
+        self.poster.process_one_post()
