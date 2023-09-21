@@ -4,6 +4,8 @@ import logging
 import re
 from itertools import chain
 from rapidfuzz import process, fuzz
+import pandas as pd
+import numpy as np
 
 # LOGGING AND CONFIG
 
@@ -32,10 +34,35 @@ def load_config(args):
     except ValueError as e:
         raise argparse.ArgumentTypeError(f"The file {args.config} is not a valid JSON file: {str(e)}")
 
-config = load_config(parse_arguments())
+try: # If run in shell
+    config = load_config(parse_arguments())
+except: # If run locally in jupyter notebook
+    try:
+        local_path = "config.json"
+        with open(local_path, 'r') as json_file:
+            config = json.load(json_file)
+    except: #If run in google cloud platform
+        from google.cloud import storage
+        client = storage.Client()
+        bucket = client.get_bucket('goodreads-rebot')
+        file_blob = storage.Blob('config.json', bucket)
+        download_data = file_blob.download_as_string().decode()
+        config = json.loads(download_data)
+
+def is_submission(reddit_post):
+    if hasattr(reddit_post, 'selftext'):
+        return True
+    else:
+        return False
 
 
 # MATCHING TITLES UTILS:
+
+def replace_nan(var, replacement="?"):
+    if str(var) in ['nan', 'None', '<NA>']:
+        return replacement
+    else:
+        return var
 
 def extract_braces(comment_body):
     sub_parts = re.findall(r'\{\{([^}]*)\}\}', comment_body)
