@@ -1,0 +1,32 @@
+{
+  "flow":{
+    "mode": "local",
+    "run_reader": true,
+    "run_matcher": true,
+    "run_poster": true
+  },
+  "reddit": {
+    "subreddit": "suggestmeabook",
+    "limit": 100
+  },
+  "creds": {
+    "reddit_client_id": "XXX",
+    "reddit_client_secret": "XXX",
+    "reddit_user_agent": "your bot",
+    "reddit_username": "XXX",
+    "reddit_password": "XXX",
+    "bq_path": "path/to/creds.json"
+  },
+  "bq": {
+    "table_dim_books": "dataset.dim_books",
+    "table_dim_series": "dataset.dim_series",
+    "table_crawl_dates": "dataset.crawl_dates",
+    "table_to_match": "dataset.ids_to_match",
+    "table_reco": "dataset.all_recos",
+    "table_reply_logs": "dataset.ids_matched"
+  },
+  "matching": {
+    "min_ratio": 80,
+    "author_min_ratio": 85
+  }
+}
