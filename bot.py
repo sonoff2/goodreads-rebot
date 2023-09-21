@@ -189,7 +189,7 @@ class Matcher:
         else:
             log_list = [self.subreddit_str, post.id, post_type, reply.id]
         df_to_log = pd.DataFrame([
-            log_list + [formatter.book_info["master_grlink"], formatter.score, post.author]
+            log_list + [formatter.book_info["master_grlink"], formatter.score, post.author.name]
             for formatter in formatter_list
         ], columns = ['subreddit', 'post_id', 'post_type', 'reply_id', 'master_grlink', 'score', 'author'])
         bq.save_reply_logs(df_to_log=df_to_log)
