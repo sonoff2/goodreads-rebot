@@ -17,8 +17,27 @@ class Formatter:
             self.book_info = bq.get_book_info(self.title, self.is_series)
             print(self.book_info)
 
+    def build_long_title(self):
+        if hasattr(self, "book_info"):
+            if self.book_info["series_title"] is not None:
+                return "{} ({} #{})".format(
+                    self.book_info['short_title'],
+                    self.book_info['series_title'],
+                    self.format_book_number(self.book_info['book_number'])
+                )
+            else:
+                return self.book_info['short_title']
+        else:
+            return ""
+
+    def format_book_number(self, book_number):
+        if str(book_number)[-2:] == ".0":
+            return int(book_number)
+        else:
+            return book_number
+
     def format_link(self):
-        title = self.book_info["short_title"]
+        title = self.build_long_title()
         url = self.book_info["master_grlink"]
         author = self.book_info["first_author"]
         nth = self.nth + 1
