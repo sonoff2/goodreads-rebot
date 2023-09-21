@@ -1,0 +1,6 @@
+rapidfuzz
+praw
+google-cloud
+google-cloud-bigquery
+google-cloud-storage
+pandas
