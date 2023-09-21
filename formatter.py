@@ -1,7 +1,8 @@
 import bq
-import re
+import ast
 import logging
 from utils import config
+import itertools
 import textwrap
 
 class Formatter:
@@ -17,42 +18,66 @@ class Formatter:
             print(self.book_info)
 
     def format_link(self):
-        title = self.book_info["title"]
-        url = self.book_info["grlink"]
+        title = self.book_info["short_title"]
+        url = self.book_info["master_grlink"]
+        author = self.book_info["first_author"]
         nth = self.nth + 1
         total = self.total
+        if total != 1:
+            prefix = f"\#{nth}/{total}: "
+        else:
+            prefix = ""
         score = self.score
 
         if score < config['matching']['min_ratio']:
-            return f"**#{nth}/{total}: Search Failed** _(Found [{title}]({url}) with bad matching score of {score}%)_"
+            return f"{prefix}**Search Failed** ^(&#40;Found [{title}]({url}) with bad matching score of {score}% ⚠️&#41;)"
         else:
-            return f"**#{nth}/{total}: [{title}]({url})** (Matching {score}%)"
-
-    def format_header(self):
-        pages = self.book_info["pages"]
-        year = self.book_info["year"]
-        authors = self.book_info["author_list"].replace("'", "").replace("[", "").replace("]", "")
-
-        return "^(By: %s | %s pages | Published: %s)" % (authors, pages or "?", year or "?")
+            return f"{prefix}**[{title}]({url}) by {author}** ^(&#40;Matching {score}% ☑️&#41;)"
 
     def format_description(self):
         description = self.book_info["summary"]
         if description is None:
-            return ""
-        return textwrap.shorten(">" + description.replace('&gt;', ">"), width=750, placeholder=" (...)")
+            return "\n\n> **Summary:** ?"
+        return '\n\n'+textwrap.shorten(
+            "> **Summary:** " + description.replace('&gt;', ">"), width=500, placeholder=" (...)")
 
     def format_book_footer(self):
-        n_sugg = self.book_info['n_sugg']
+        n_sugg = self.book_info['n_bot']
+        pages = self.book_info["pages"] or "?"
+        year = self.book_info["year"] or "?"
         s = "s" if n_sugg > 1 else ""
-        return "^(This book has been suggested %s time%s)" % (n_sugg, s)
+        return f"\n^({pages} pages | Published: {year} | Suggested {n_sugg} time{s})"
+
+    def format_tags(self):
+        if self.book_info['tags']:
+            tags = [str.capitalize(tag) for tag in ast.literal_eval(self.book_info['tags']) if len(tag) < 30]
+            tags = list(itertools.takewhile(lambda x: ')' not in x, tags)) # Cleaning because DB has some corrupted data
+            return "\n> **Themes**: " + ", ".join(tags)
+        else:
+            return ""
+
+    def format_recos(self):
+        recos = bq.get_top_2_books(self.book_info['master_grlink'])
+        if len(recos) >= 2:
+            title1 = recos.iloc[0, recos.columns.get_loc('title')]
+            url1 = recos.iloc[0, recos.columns.get_loc('grlink')]
+            author1 = recos.iloc[0, recos.columns.get_loc('author')]
+            title2 = recos.iloc[1, recos.columns.get_loc('title')]
+            url2 = recos.iloc[1, recos.columns.get_loc('grlink')]
+            author2 = recos.iloc[1, recos.columns.get_loc('author')]
+            return f"\n> **Top 2 recommended-along**: [{title1}]({url1}) by {author1}, [{title2}]({url2}) by {author2}"
+        else:
+            return ""
 
     def format_all(self):
         if self.score < config['matching']['min_ratio']:
-            return self.format_link()
+            return '\n' + self.format_link() + '\n'
         else:
-            return '\n\n'.join([
-            self.format_link(),
-            self.format_header(),
-            self.format_description(),
-            self.format_book_footer()
-        ])
+            parts = [
+                self.format_link(),
+                self.format_book_footer(),
+                self.format_description(),
+                self.format_tags(),
+                self.format_recos()
+            ]
+            return '\n'.join([part for part in parts if len(part) > 1])
