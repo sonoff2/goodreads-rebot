@@ -4,6 +4,7 @@ import utils
 import logging
 from utils import config
 from formatter import Formatter
+import pandas as pd
 
 class Reader:
 
@@ -35,8 +36,10 @@ class Reader:
 
         if latest_submissions or latest_comments:
             max_timestamp = max(post.created_utc for post in latest_comments + latest_submissions)
+            logging.info(f'Updating timestamp with {max_timestamp}')
             bq.update_timestamp(self.subreddit_str, max_timestamp)
 
+        logging.info(f'Got {len(latest_submissions)} posts and {len(latest_comments)} comments')
         return self
 
     def save_posts(self):
@@ -76,18 +79,23 @@ class Matcher:
     # FULL FLOW TO TREAT ONE POST
 
     def process_one_post(self):
-        ids = bq.get_post_ids_to_match(self.subreddit_str)[0]
-        post_id, post_type = ids[0], ids[1] # Most recent comment
-        if post_type == "comment":
-            post = self.reddit.comment(id=post_id)
-            title_matches = self.match_titles(post.body)
-        elif post_type == "submission":
-            post = self.reddit.submission(id=post_id)
-            title_matches = self.match_titles(post.selftext)
-        else:
-            raise ValueError
-        reply_text = self.build_reply(title_matches)
-        self.post_reply(post, reply_text)
+        ids = bq.get_post_ids_to_match(self.subreddit_str)
+        if len(ids) > 0:
+            ids = ids[0]
+            post_id, post_type = ids[0], ids[1] # Most recent comment
+            if post_type == "comment":
+                post = self.reddit.comment(id=post_id)
+                title_matches = self.match_titles(post.body)
+            elif post_type == "submission":
+                post = self.reddit.submission(id=post_id)
+                title_matches = self.match_titles(post.selftext)
+            else:
+                raise ValueError
+            formatters = self.get_formatters(title_matches)
+            reply_text = self.build_reply(title_matches, formatters)
+            logging.info(f'Posting: {reply_text}')
+            reply = self.post_reply(post, reply_text)
+            self.monitoring_after_reply(post, post_type, reply, formatters)
 
     def match_titles(self, body):
         """
@@ -153,26 +161,40 @@ class Matcher:
     def match_all(self, s):
         return utils.top_k_matches_list(s, self.all_titles, 1, func="full")
 
-    def build_reply(self, title_matches):
-        logging.info(f"Building the reply for all matches: {title_matches}")
-        reply = "\n\n".join([
-            Formatter(title_match=title_match[0], nth=i, total=len(title_matches)).format_all()
+    def get_formatters(self, title_matches):
+        return [
+            Formatter(title_match=title_match[0], nth=i, total=len(title_matches))
             for i, title_match in enumerate(title_matches)
-        ])
+        ]
+
+    def build_reply(self, title_matches, formatter_list):
+        logging.info(f"Building the reply for all matches: {title_matches}")
+        suffix = "\n\n*[Sep-23] I'm a revival bot of goodreads-bot, currently warming up its wires on old posts. Stay tuned for the launch. Bzzzt!*"
+        reply = "\n---\n".join([formatter.format_all() for formatter in formatter_list])+suffix
         return reply
 
     def post_reply(self, post, reply_text):
         try:
-            logging.info(f"Answering the reply text : {reply_text}")
-            posted_reply = post.reply(reply_text)
-
-            # If reply is successfully posted, remove the comment from Firestore
-            if posted_reply:
-                pass
-                bq.remove_post_ids_to_match(ids=[post.id])
+            logging.info(f"Answering post {post.id} with text : {reply_text}")
+            reply = post.reply(reply_text)
+            return reply
 
         except Exception as e:
             print(f"Error posting reply: {e}")
+            return None
+
+    def monitoring_after_reply(self, post, post_type, reply, formatter_list):
+        if not reply:
+            log_list = [self.subreddit_str, post.id, post_type, None]
+        else:
+            log_list = [self.subreddit_str, post.id, post_type, reply.id]
+        df_to_log = pd.DataFrame([
+            log_list + [formatter.book_info["master_grlink"], formatter.score, post.author]
+            for formatter in formatter_list
+        ], columns = ['subreddit', 'post_id', 'post_type', 'reply_id', 'master_grlink', 'score', 'author'])
+        bq.save_reply_logs(df_to_log=df_to_log)
+        bq.remove_post_ids_to_match(ids=[post.id])
+        return
 
 class Bot:
 
