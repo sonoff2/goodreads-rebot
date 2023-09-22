@@ -27,7 +27,7 @@ The bot behavior is configured via the `config.json` file:
 - `min_ratio` - Minimum matching score (/100) to accept a book title match
 - `table_*` - Names of the BigQuery tables 
 
-## Database Schema
+## Overview of Database Schema
 
 The bot mainly uses the following BigQuery tables:
 
@@ -41,11 +41,6 @@ The bot mainly uses the following BigQuery tables:
 - `tags` - Array of topic tags  
 - `summary` - Book summary text
 - ...plus other metadata fields
-
-**`table_dim_series`** - Info on book series 
-
-- `series_id` - Unique ID
-- `series_title` - Series name
 
 **`table_crawl_dates`** - Tracks last crawl timestamp per subreddit 
 
@@ -72,6 +67,6 @@ To start the bot:
 
 1. Set up BigQuery credentials 
 2. Configure `config.json`
-3. Run `python main.py`
+3. Run the command: `python main.py --config config.json`
 
 The `main.py` script will initialize the `Reader` and `Matcher` objects and run through the workflow ONCE: one crawling, one matching. Adapt the file for more advanced behavior.
