@@ -2,6 +2,8 @@
 
 This bot fetches posts from a specified subreddit, searches for book titles mentioned by users in {{double braces}}, queries a database to find info on those books, and replies to the posts with additional details.
 
+This is a revamp of [Goodreads-bot](https://github.com/rodohanna/reddit-goodreads-bot), that first launched but died after Goodreads shut down API access. This version relies on a private database.
+
 ## How it Works
 
 The bot has a 3-step workflow:
