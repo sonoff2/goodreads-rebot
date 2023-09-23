@@ -133,6 +133,8 @@ def get_post_ids_to_match(subreddit, table=TABLE_TO_MATCH, table_already_replied
         WHERE TRUE
             AND T2.post_id IS NULL -- Post has not been processed yet
             AND T.subreddit = '{subreddit}' 
+            AND T.post_type = 'comment' -- Answering to submissions will be added later
+            AND T.post_timestamp >= 1695500000
         ORDER BY post_timestamp DESC
     """)[['post_id', 'post_type']].values.tolist()
 
