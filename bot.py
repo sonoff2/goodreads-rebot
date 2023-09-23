@@ -94,6 +94,8 @@ class Matcher:
             formatters = self.get_formatters(title_matches)
             reply_text = self.build_reply(title_matches, formatters)
             logging.info(f'Posting: {reply_text}')
+            #hijack_post = self.reddit.comment(id='jysq9m0')
+            #reply = self.post_reply(hijack_post, post.body + '\n########################\n\n' + reply_text)
             reply = self.post_reply(post, reply_text)
             self.monitoring_after_reply(post, post_type, reply, formatters)
 
@@ -167,10 +169,10 @@ class Matcher:
             for i, title_match in enumerate(title_matches)
         ]
 
-    def build_reply(self, title_matches, formatter_list):
+    def build_reply(self, title_matches, formatter_list, suffix = ""):
         logging.info(f"Building the reply for all matches: {title_matches}")
-        suffix = "\n\n*[Sep-23] I'm a revival bot of goodreads-bot, currently warming up its wires on old posts. Stay tuned for the launch. Bzzzt!*"
-        reply = "\n---\n".join([formatter.format_all() for formatter in formatter_list])+suffix
+        #suffix = "\n\n*[Sep-23] I'm a revival bot of goodreads-bot, currently warming up its wires on old posts. Stay tuned for the launch. Bzzzt!*"
+        reply = "\n---\n".join([formatter.format_all() for formatter in formatter_list]) + suffix
         return reply
 
     def post_reply(self, post, reply_text):
