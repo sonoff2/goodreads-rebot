@@ -88,6 +88,12 @@ class Formatter:
         else:
             return ""
 
+    def format_links(self):
+        if self.nth + 1 == self.total:
+            return "\n^( [Provide Feedback](https://docs.google.com/forms/d/e/1FAIpQLSctJFIlf7XR_3y0ZOELiDFYufSKJBKlxE9hUFXz4CGIwBXAQQ/viewform?usp=pp_url) | [Source Code](https://github.com/sonoff2/goodreads-rebot) )"
+        else:
+            return ""
+
     def format_all(self):
         if self.score < config['matching']['min_ratio']:
             return '\n' + self.format_link() + '\n'
@@ -97,6 +103,7 @@ class Formatter:
                 self.format_book_footer(),
                 self.format_description(),
                 self.format_tags(),
-                self.format_recos()
+                self.format_recos(),
+                self.format_links()
             ]
             return '\n'.join([part for part in parts if len(part) > 1])
