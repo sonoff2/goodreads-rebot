@@ -2,10 +2,9 @@ import argparse
 import json
 import logging
 import re
+
 from itertools import chain
 from rapidfuzz import process, fuzz
-import pandas as pd
-import numpy as np
 
 # LOGGING AND CONFIG
 
@@ -36,9 +35,9 @@ def load_config(args):
 
 try: # If run in shell
     config = load_config(parse_arguments())
-except: # If run locally in jupyter notebook
-    try:
-        local_path = "config.json"
+except:
+    try: # If run locally in jupyter notebook
+        local_path = input('provide config.json path')
         with open(local_path, 'r') as json_file:
             config = json.load(json_file)
     except: #If run in google cloud platform
@@ -59,7 +58,7 @@ def is_submission(reddit_post):
 # MATCHING TITLES UTILS:
 
 def replace_nan(var, replacement="?"):
-    if str(var) in ['nan', 'None', '<NA>']:
+    if str(var) in ['nan', 'None', '<NA>', 'NaN', 'NA']:
         return replacement
     else:
         return var

@@ -2,7 +2,7 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 from google.cloud.bigquery.schema import SchemaField
 from google.api_core.exceptions import Conflict
-from utils import config, replace_nan
+from grbot.utils import config, replace_nan
 import pandas as pd
 import logging
 
@@ -58,7 +58,9 @@ def overwrite_populate(df, table_id, schema_dic, client=client):
 
     # Create a new table with the schema
     table = bigquery.Table(f"{project_id}.{dataset_id}.{table_bq_id}")
-    table.schema = [bigquery.SchemaField(key, value) for key, value in schema_dic.items()]
+    table.schema = [bigquery.SchemaField(key, value) if 'REPEATED' not in value
+                    else bigquery.SchemaField(key, value.split('-')[0], mode = 'REPEATED')
+                    for key, value in schema_dic.items()]
 
     # Create the table in BigQuery
     try:
@@ -85,14 +87,14 @@ def sql_to_df(query, client=client):
     logging.info(f"""Attempting to run the query : "{query.strip()}" """)
     return client.query(query).result().to_dataframe()
 
-def get_books_by_author(table=TABLE_DIM_BOOKS, order_by='n_bot'):
+def get_books_by_author(table=TABLE_DIM_BOOKS, order_by='sort_n'):
     query = f"""
         SELECT lower(last_name) as author, lower(short_title) as title FROM {table} ORDER BY author ASC, {order_by} DESC
     """
     df = sql_to_df(query)
     return df.groupby('author')['title'].apply(list)
 
-def get_all_titles(table=TABLE_DIM_BOOKS, order_by='n_bot'):
+def get_all_titles(table=TABLE_DIM_BOOKS, order_by='sort_n'):
     query = f"""
         SELECT lower(short_title) as short_title FROM {table} ORDER BY {order_by} DESC
     """
@@ -146,25 +148,26 @@ def remove_post_ids_to_match(ids, table=TABLE_TO_MATCH):
         table=table
     )
 
-def get_book_info(title, is_series, order_by='n_bot'):
+def get_book_info(title, is_series, order_by='sort_n'):
     if is_series:
-        book_info = get_book_info_from_series(series_title=title, order_by=order_by)
+        book_info = _get_book_info_from_series(series_title=title, order_by=order_by)
     else:
-        book_info = get_book_info_not_series(book_title=title, order_by=order_by)
-    for col in ['year', 'pages']:
-        book_info[col] = replace_nan(book_info[col])
-    return book_info
+        book_info = _get_book_info_not_series(book_title=title, order_by=order_by)
+    for col in book_info.columns:
+        book_info[col] = book_info[col].apply(lambda x: replace_nan(x, None))
+    logging.info(str(book_info))
+    return book_info.iloc[0].to_dict()
 
-def get_book_info_not_series(book_title, table=TABLE_DIM_BOOKS, order_by='n_bot'):
+def _get_book_info_not_series(book_title, table=TABLE_DIM_BOOKS, order_by='sort_n'):
     return sql_to_df(
             f"""SELECT * FROM {table} WHERE LOWER(short_title) = '{sanitize_for_sql(book_title)}' ORDER BY {order_by} DESC"""
-        ).iloc[0].to_dict()
+        )
 
-def get_book_info_from_series(
+def _get_book_info_from_series(
     series_title,
     table_serie=TABLE_DIM_SERIES,
     table_book=TABLE_DIM_BOOKS,
-    order_by='n_bot'
+    order_by='sort_n'
 ):
     return sql_to_df(f"""
             WITH TOP_SERIE AS (
@@ -173,7 +176,7 @@ def get_book_info_from_series(
             )
             SELECT * FROM {table_book} INNER JOIN TOP_SERIE USING (series_title)
             ORDER BY {order_by} DESC LIMIT 1
-        """).iloc[0].to_dict()
+        """)
 
 def get_top_2_books(grlink, table=TABLE_RECO):
     query = f"""

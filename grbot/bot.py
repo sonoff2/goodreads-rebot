@@ -1,10 +1,10 @@
-import praw_wrapper
-import bq
-import utils
+from grbot import praw_wrapper, bq, utils
+from grbot.utils import config
+from grbot.formatter import Formatter
+
 import logging
-from utils import config
-from formatter import Formatter
 import pandas as pd
+
 
 class Reader:
 
@@ -66,7 +66,7 @@ class Matcher:
         # Matching part:
         self.subreddit_str = config['reddit']['subreddit']
         self.post_ids = bq.get_post_ids_to_match(subreddit=self.subreddit_str)
-        self.books_by_author = bq.get_books_by_author()  # format = {« jk rowling »: [list…], etc}
+        self.books_by_author = bq.get_books_by_author()  # format = {"jk rowling": [list…], etc}
         self.all_titles = bq.get_all_titles()  # format = list of book titles in DB
         self.series_titles = bq.get_series_titles()
         self.min_ratio = config['matching']['min_ratio']
@@ -81,32 +81,36 @@ class Matcher:
     def process_one_post(self):
         ids = bq.get_post_ids_to_match(self.subreddit_str)
         if len(ids) > 0:
+            logging.info("Got one post to match")
             ids = ids[0]
             post_id, post_type = ids[0], ids[1] # Most recent comment
             if post_type == "comment":
                 post = self.reddit.comment(id=post_id)
-                title_matches = self.match_titles(post.body)
+                books_requested = utils.extract_braces(post.body)[0:10]
             elif post_type == "submission":
                 post = self.reddit.submission(id=post_id)
-                title_matches = self.match_titles(post.selftext)
+                books_requested = utils.extract_braces(post.selftext)[0:10]
             else:
                 raise ValueError
-            formatters = self.get_formatters(title_matches)
+            title_matches = self.match_titles(books_requested)
+            formatters = self.get_formatters(title_matches, books_requested)
             reply_text = self.build_reply(title_matches, formatters)
             logging.info(f'Posting: {reply_text}')
             #hijack_post = self.reddit.comment(id='jysq9m0')
             #reply = self.post_reply(hijack_post, post.body + '\n########################\n\n' + reply_text)
             reply = self.post_reply(post, reply_text)
             self.monitoring_after_reply(post, post_type, reply, formatters)
+        else:
+            logging.info("bq.get_post_ids_to_match returned empty string")
 
-    def match_titles(self, body):
+    def match_titles(self, books_requested):
         """
         return the list of title(s) matching the {{string(s)}} in comment body
-        :param body:
+        :param books_requested:
         :return:
         """
         return [
-            self.match_title(s) for s in utils.extract_braces(body)[0:10] # 10 matches max par post to avoid flood
+            self.match_title(s) for s in books_requested # 10 matches max par post to avoid flood
         ]
 
     def match_title(self, s):
@@ -139,9 +143,9 @@ class Matcher:
         without_by = utils.top_k_matches_list(s, self.series_titles, 1, func="full")
         return [(*max(with_by + without_by, key=lambda x: x[1]), True)] # True for "is_series"
 
-    def title_is_valid(self, result):
+    def title_is_valid(self, result, threshold=None):
         try:
-            return result[0][1] > self.min_ratio
+            return result[0][1] > (threshold or self.min_ratio)
         except:
             print("Problem validating title result: ", result)
             return False
@@ -161,12 +165,16 @@ class Matcher:
         return utils.top_k_matches_list(s, [title for title in self.all_titles if "by" in title], 1, func="full")
 
     def match_all(self, s):
-        return utils.top_k_matches_list(s, self.all_titles, 1, func="full")
+        match_on_top = utils.top_k_matches_list(s, self.all_titles[0:5000], 1, func="full")
+        if self.title_is_valid(match_on_top, 90):
+            return match_on_top
+        else:
+            return utils.top_k_matches_list(s, self.all_titles, 1, func="full")
 
-    def get_formatters(self, title_matches):
+    def get_formatters(self, title_matches, books_requested):
         return [
-            Formatter(title_match=title_match[0], nth=i, total=len(title_matches))
-            for i, title_match in enumerate(title_matches)
+            Formatter(title_match=title_match[0], nth=i, total=len(title_matches), book_requested=book)
+            for i, (title_match, book) in enumerate(zip(title_matches, books_requested))
         ]
 
     def build_reply(self, title_matches, formatter_list, suffix = ""):
