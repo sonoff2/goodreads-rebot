@@ -1,6 +1,7 @@
-from grbot import praw_wrapper, bq, utils
-from grbot.utils import config
-from grbot.formatter import Formatter
+from grbot import praw_wrapper, bq, utils, matching
+from grbot.configurator import config
+from grbot.formatting import Formatter
+from grbot.matching import Match
 
 import logging
 import pandas as pd
@@ -67,6 +68,7 @@ class Matcher:
         self.subreddit_str = config['reddit']['subreddit']
         self.post_ids = bq.get_post_ids_to_match(subreddit=self.subreddit_str)
         self.books_by_author = bq.get_books_by_author()  # format = {"jk rowling": [list…], etc}
+        self.series_by_author = bq.get_series_by_author()
         self.all_titles = bq.get_all_titles()  # format = list of book titles in DB
         self.series_titles = bq.get_series_titles()
         self.min_ratio = config['matching']['min_ratio']
@@ -115,66 +117,71 @@ class Matcher:
 
     def match_title(self, s):
 
-        title = [(None, 0)]
-        if len(s) > 150:
-            return title  # parsing error
         s = str.lower(s.strip())
 
-        # Case 1 : Series
-        serie_title = self.match_series(s) # lookup series first
+        best_match = Match(s, (None, 0), False)
+        if len(s) > 150:
+            return best_match  # parsing error
 
-        # Case 2 : not a Series
         if "by" in s: # Maybe the user provided the author:
-            title = self.match_author(s)
-            if not self.title_is_valid(title): # But maybe it's the book title that contains "by"
-                title = self.match_titles_with_by(s)
-                if not self.title_is_valid(title): # Or there is a mistake on author, lets drop it
-                    title = self.match_all(s.split(" by ")[0])
-        if (not self.title_is_valid(title)) or (" by " not in s): # If title was not found, do basic search
-            title = self.match_all(s)
-        # Not a series so False:
-        non_serie_title = [(*t, False) for t in title]
+            best_match = matching.best_in([
+                best_match,
+                *self.match_author(s, search_series=False),
+                *self.match_author(s, search_series=True)
+            ])
+            if not best_match.validate(): # But maybe it's the book title that contains "by"
+                best_match = matching.best_in([
+                    best_match,
+                    *self.match_titles_with_by(s, search_series=False),
+                    *self.match_titles_with_by(s, search_series=True)
+                ])
 
-        # Finally return the best match between Series or not
-        return  [max(serie_title + non_serie_title, key=lambda x: x[1])]
+        if (not best_match.validate()) or (" by " not in s): # If title was not found, do basic search
+            best_match = matching.best_in([
+                best_match,
+                *self.match_all(s, search_series=False),
+                *self.match_all(s, search_series=True)
+            ])
 
-    def match_series(self, s):
-        with_by = utils.top_k_matches_list(s.split(' by ')[0], self.series_titles, 1, func="full")
-        without_by = utils.top_k_matches_list(s, self.series_titles, 1, func="full")
-        return [(*max(with_by + without_by, key=lambda x: x[1]), True)] # True for "is_series"
+        return best_match
 
-    def title_is_valid(self, result, threshold=None):
-        try:
-            return result[0][1] > (threshold or self.min_ratio)
-        except:
-            print("Problem validating title result: ", result)
-            return False
-
-    def match_author(self, s):
+    def match_author(self, s, search_series=False):
         s_split = s.rsplit(' by ', 1)
         # Last word of the string is supposedly the author last name:
         last_name = next(word for word in reversed(s_split[1].split()) if len(word) >= 2)
         # Get the closest authors in base (the user may have done a typo)
-        closest_authors = [x[0].rstrip("#") for x in
-            utils.top_k_matches_list(last_name, list(self.books_by_author.keys()), k=3, func='full')
-                           if x[1] > self.author_min_ratio]
-        # Find the closest book title in their books:
-        return utils.top_k_matches_dic(s_split[0], self.books_by_author, closest_authors, k=1, func="full")
-
-    def match_titles_with_by(self, s):
-        return utils.top_k_matches_list(s, [title for title in self.all_titles if "by" in title], 1, func="full")
-
-    def match_all(self, s):
-        match_on_top = utils.top_k_matches_list(s, self.all_titles[0:5000], 1, func="full")
-        if self.title_is_valid(match_on_top, 90):
-            return match_on_top
+        closest_authors = [m.name.rstrip("#") for m in
+            utils.top_k_matches_list(
+                last_name, list(self.books_by_author.keys()), search_series, k=3, func='full')
+                           if m.score > self.author_min_ratio]
+        if search_series:
+            search_dic = self.series_by_author
         else:
-            return utils.top_k_matches_list(s, self.all_titles, 1, func="full")
+            search_dic = self.books_by_author
+        return utils.top_k_matches_dic(s_split[0], search_dic, closest_authors, search_series, k=1, func="full")
+
+    def match_titles_with_by(self, s, search_series=False):
+        if search_series:
+            search_list = self.series_titles
+        else:
+            search_list = self.all_titles
+        return utils.top_k_matches_list(s, [title for title in search_list if "by" in title], search_series, 1, func="full")
+
+    def match_all(self, s,  search_series=False):
+        if search_series:
+            search_list = self.series_titles
+        else:
+            search_list = self.all_titles
+        best_match_on_top_5000 = utils.top_k_matches_list(s, search_list[0:5000], search_series, 1, func="full")
+        if best_match_on_top_5000[0].validate() or search_series:
+            return best_match_on_top_5000
+        else:
+            return utils.top_k_matches_list(s, search_list, search_series, 1, func="full")
 
     def get_formatters(self, title_matches, books_requested):
         return [
-            Formatter(title_match=title_match[0], nth=i, total=len(title_matches), book_requested=book)
-            for i, (title_match, book) in enumerate(zip(title_matches, books_requested))
+            Formatter(best_match=best_match, nth=i, total=len(title_matches), book_requested=book)
+            for i, (best_match, book) in enumerate(zip(title_matches, books_requested))
         ]
 
     def build_reply(self, title_matches, formatter_list, suffix = ""):

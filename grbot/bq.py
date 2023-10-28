@@ -2,7 +2,8 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 from google.cloud.bigquery.schema import SchemaField
 from google.api_core.exceptions import Conflict
-from grbot.utils import config, replace_nan
+from grbot.utils import replace_nan
+from grbot.configurator import config
 import pandas as pd
 import logging
 
@@ -94,17 +95,24 @@ def get_books_by_author(table=TABLE_DIM_BOOKS, order_by='sort_n'):
     df = sql_to_df(query)
     return df.groupby('author')['title'].apply(list)
 
-def get_all_titles(table=TABLE_DIM_BOOKS, order_by='sort_n'):
+def get_series_by_author(table=TABLE_DIM_SERIES, order_by='sort_n'):
     query = f"""
-        SELECT lower(short_title) as short_title FROM {table} ORDER BY {order_by} DESC
+        SELECT lower(last_name) as author, lower(series_title) as title FROM {table} ORDER BY author ASC, {order_by} DESC
     """
-    return list(sql_to_df(query)['short_title'])
+    df = sql_to_df(query)
+    return df.groupby('author')['title'].apply(list)
+
+def get_book_titles(table=TABLE_DIM_BOOKS, order_by='sort_n'):
+    query = f"""
+        SELECT book_id, title, author FROM {table} ORDER BY {order_by} DESC
+    """
+    return sql_to_df(query)
 
 def get_series_titles(table=TABLE_DIM_SERIES):
     query = f"""
-        SELECT lower(series_title) as series_title from {table}
+        SELECT series_id, series_title, author from {table}
     """
-    return list(sql_to_df(query)['series_title'])
+    return sql_to_df(query)
 
 def get_last_timestamp(subreddit, table=TABLE_CRAWL_DATES):
     query = f"""
@@ -147,6 +155,27 @@ def remove_post_ids_to_match(ids, table=TABLE_TO_MATCH):
         my_list=ids,
         table=table
     )
+
+def get_info(book_id_list, table=TABLE_DIM_BOOKS):
+    if len(book_id_list) < 1:
+        return None
+    info_df = sql_to_df(f"""SELECT * FROM {table} WHERE book_id IN ({", ".join(book_id_list)})""")
+    for col in info_df.columns:
+        info_df[col] = info_df[col].apply(lambda x: replace_nan(x, None))
+    return info_df.groupby('book_id').apply(lambda x: x.to_dict('r')[0]).to_dict()
+
+def book_id_from_series_id(
+    series_id,
+    table_book=TABLE_DIM_BOOKS,
+    order_by='sort_n'
+):
+    return sql_to_df(f"""
+        SELECT book_id FROM {table_book}
+        WHERE series_id = {series_id}
+        ORDER BY {order_by} DESC 
+        LIMIT 1
+    """).loc[0, 'book_id']
+
 
 def get_book_info(title, is_series, order_by='sort_n'):
     if is_series:

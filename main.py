@@ -1,12 +1,12 @@
 from grbot import bot, utils
 import logging
-from grbot.utils import config
+from grbot.configurator import config, setup_logging
 
 
 def main():
 
     # Start logging
-    utils.setup_logging()
+    setup_logging()
 
     # Intiate instances
     my_bot = bot.Bot(config)

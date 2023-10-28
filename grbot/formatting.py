@@ -1,18 +1,18 @@
 from grbot import bq
-from grbot.utils import config
+from grbot.configurator import config
 
 import logging
 import itertools
 import textwrap
 
 class Formatter:
-    def __init__(self, title_match, nth, total, book_requested):
-        logging.info(f"Received title_match : {title_match}")
-        self.title = str(title_match[0]).rstrip("#")
+    def __init__(self, best_match, nth, total, book_requested):
+        logging.info(f"Received title_match : {best_match.name}")
+        self.title = best_match.name.rstrip("#")
         self.nth = nth
         self.total = total
-        self.score = int(title_match[1])
-        self.is_series = title_match[3]
+        self.score = int(best_match.score)
+        self.is_series = best_match.is_serie
         self.book_requested = book_requested
         if self.title is not None:
             self.book_info = bq.get_book_info(self.title, self.is_series)
@@ -50,7 +50,7 @@ class Formatter:
         score = self.score
 
         if score < config['matching']['min_ratio']:
-            return f"""{prefix}⚠ Could not find "{self.book_requested}" ; Found [{title}]({url}) ^(&#40;with bad matching score of {score}%  &#41;)"""
+            return f"""{prefix}⚠ Could not *exactly* find "*{self.book_requested}*" but found [{title}]({url}) ^(&#40;with matching score of {score}%  &#41;)"""
         else:
             return f"{prefix}**[{title}]({url}) by {author}** ^(&#40;Matching {score}% ☑️&#41;)"
 
@@ -97,7 +97,7 @@ class Formatter:
             return ""
 
     def default_failed_text(self):
-        return "\n***Book not found** out of **60.000 books** in database: either too recent (2023), mispelled (check Goodreads) or too niche. Please note we are working hard to update the database to **200.000 books** by the end of this month.*\n"
+        return "\n^(**Possible reasons for mismatch: either too recent &#40;2023&#41;, mispelled &#40;check Goodreads&#41; or too niche. Please note we are working hard to update the database to **200.000 books** by the end of this month.*)\n"
 
     def format_all(self):
         if self.score < config['matching']['min_ratio']:
