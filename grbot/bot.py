@@ -81,7 +81,7 @@ class Matcher:
     def process_one_post(self):
         ids = bq.get_post_ids_to_match(self.subreddit_str)
         if len(ids) > 0:
-            logging.info("Got one post to match")
+            logging.info(f"Got one post to match : {ids[0]}")
             ids = ids[0]
             post_id, post_type = ids[0], ids[1] # Most recent comment
             if post_type == "comment":
@@ -124,12 +124,12 @@ class Matcher:
         serie_title = self.match_series(s) # lookup series first
 
         # Case 2 : not a Series
-        if "by" in s: # Maybe the user provided the author:
+        if " by " in s: # Maybe the user provided the author:
             title = self.match_author(s)
             if not self.title_is_valid(title): # But maybe it's the book title that contains "by"
                 title = self.match_titles_with_by(s)
-                if not self.title_is_valid(title): # Or there is a mistake on author, lets drop it
-                    title = self.match_all(s.split(" by ")[0])
+                #if not self.title_is_valid(title): # Or there is a mistake on author, lets drop it
+                #    title = self.match_all(s.split(" by ")[0])
         if (not self.title_is_valid(title)) or (" by " not in s): # If title was not found, do basic search
             title = self.match_all(s)
         # Not a series so False:
