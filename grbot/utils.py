@@ -1,8 +1,5 @@
 import logging
 import re
-
-from grbot.matching import Match
-from itertools import chain
 from rapidfuzz import process, fuzz
 
 
