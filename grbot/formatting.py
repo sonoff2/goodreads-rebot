@@ -7,16 +7,14 @@ import textwrap
 
 class Formatter:
     def __init__(self, best_match, nth, total, book_requested):
-        logging.info(f"Received title_match : {best_match.name}")
-        self.title = best_match.name.rstrip("#")
+        logging.info(f"Received title_match : {best_match.book.title}, info = {best_match.book.info}")
+        self.title = best_match.book.title
         self.nth = nth
         self.total = total
         self.score = int(best_match.score)
         self.is_series = best_match.is_serie
         self.book_requested = book_requested
-        if self.title is not None:
-            self.book_info = bq.get_book_info(self.title, self.is_series)
-            print(self.book_info)
+        self.book_info = best_match.book.info
 
     def build_long_title(self):
         if hasattr(self, "book_info"):

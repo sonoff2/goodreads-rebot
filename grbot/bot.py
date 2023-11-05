@@ -1,11 +1,10 @@
 from grbot import praw_wrapper, bq, utils, matching
 from grbot.configurator import config
 from grbot.formatting import Formatter
-from grbot.matching import Match
+from grbot.matching import Matcher
 
 import logging
 import pandas as pd
-
 
 class Reader:
 
@@ -60,128 +59,16 @@ class Reader:
         return True
 
 
-class Matcher:
+class Poster:
 
     def __init__(self, config):
-
-        # Matching part:
-        self.subreddit_str = config['reddit']['subreddit']
-        self.post_ids = bq.get_post_ids_to_match(subreddit=self.subreddit_str)
-        self.books_by_author = bq.get_books_by_author()  # format = {"jk rowling": [list…], etc}
-        self.series_by_author = bq.get_series_by_author()
-        self.all_titles = bq.get_all_titles()  # format = list of book titles in DB
-        self.series_titles = bq.get_series_titles()
-        self.min_ratio = config['matching']['min_ratio']
-        self.author_min_ratio = config['matching']['author_min_ratio']
-
-        # Replying part:
         self.reddit = praw_wrapper.init(config)
-
-
-    # FULL FLOW TO TREAT ONE POST
-
-    def process_one_post(self):
-        ids = bq.get_post_ids_to_match(self.subreddit_str)
-        if len(ids) > 0:
-            logging.info("Got one post to match")
-            ids = ids[0]
-            post_id, post_type = ids[0], ids[1] # Most recent comment
-            if post_type == "comment":
-                post = self.reddit.comment(id=post_id)
-                books_requested = utils.extract_braces(post.body)[0:10]
-            elif post_type == "submission":
-                post = self.reddit.submission(id=post_id)
-                books_requested = utils.extract_braces(post.selftext)[0:10]
-            else:
-                raise ValueError
-            title_matches = self.match_titles(books_requested)
-            formatters = self.get_formatters(title_matches, books_requested)
-            reply_text = self.build_reply(title_matches, formatters)
-            logging.info(f'Posting: {reply_text}')
-            #hijack_post = self.reddit.comment(id='jysq9m0')
-            #reply = self.post_reply(hijack_post, post.body + '\n########################\n\n' + reply_text)
-            reply = self.post_reply(post, reply_text)
-            self.monitoring_after_reply(post, post_type, reply, formatters)
-        else:
-            logging.info("bq.get_post_ids_to_match returned empty string")
-
-    def match_titles(self, books_requested):
-        """
-        return the list of title(s) matching the {{string(s)}} in comment body
-        :param books_requested:
-        :return:
-        """
-        return [
-            self.match_title(s) for s in books_requested # 10 matches max par post to avoid flood
-        ]
-
-    def match_title(self, s):
-
-        s = str.lower(s.strip())
-
-        best_match = Match(s, (None, 0), False)
-        if len(s) > 150:
-            return best_match  # parsing error
-
-        if "by" in s: # Maybe the user provided the author:
-            best_match = matching.best_in([
-                best_match,
-                *self.match_author(s, search_series=False),
-                *self.match_author(s, search_series=True)
-            ])
-            if not best_match.validate(): # But maybe it's the book title that contains "by"
-                best_match = matching.best_in([
-                    best_match,
-                    *self.match_titles_with_by(s, search_series=False),
-                    *self.match_titles_with_by(s, search_series=True)
-                ])
-
-        if (not best_match.validate()) or (" by " not in s): # If title was not found, do basic search
-            best_match = matching.best_in([
-                best_match,
-                *self.match_all(s, search_series=False),
-                *self.match_all(s, search_series=True)
-            ])
-
-        return best_match
-
-    def match_author(self, s, search_series=False):
-        s_split = s.rsplit(' by ', 1)
-        # Last word of the string is supposedly the author last name:
-        last_name = next(word for word in reversed(s_split[1].split()) if len(word) >= 2)
-        # Get the closest authors in base (the user may have done a typo)
-        closest_authors = [m.name.rstrip("#") for m in
-            utils.top_k_matches_list(
-                last_name, list(self.books_by_author.keys()), search_series, k=3, func='full')
-                           if m.score > self.author_min_ratio]
-        if search_series:
-            search_dic = self.series_by_author
-        else:
-            search_dic = self.books_by_author
-        return utils.top_k_matches_dic(s_split[0], search_dic, closest_authors, search_series, k=1, func="full")
-
-    def match_titles_with_by(self, s, search_series=False):
-        if search_series:
-            search_list = self.series_titles
-        else:
-            search_list = self.all_titles
-        return utils.top_k_matches_list(s, [title for title in search_list if "by" in title], search_series, 1, func="full")
-
-    def match_all(self, s,  search_series=False):
-        if search_series:
-            search_list = self.series_titles
-        else:
-            search_list = self.all_titles
-        best_match_on_top_5000 = utils.top_k_matches_list(s, search_list[0:5000], search_series, 1, func="full")
-        if best_match_on_top_5000[0].validate() or search_series:
-            return best_match_on_top_5000
-        else:
-            return utils.top_k_matches_list(s, search_list, search_series, 1, func="full")
+        self.subreddit_str = config['reddit']['subreddit']
 
     def get_formatters(self, title_matches, books_requested):
         return [
-            Formatter(best_match=best_match, nth=i, total=len(title_matches), book_requested=book)
-            for i, (best_match, book) in enumerate(zip(title_matches, books_requested))
+            Formatter(best_match=best_match, nth=i, total=len(title_matches), book_requested=book_requested)
+            for i, (best_match, book_requested) in enumerate(zip(title_matches, books_requested))
         ]
 
     def build_reply(self, title_matches, formatter_list, suffix = ""):
@@ -216,12 +103,37 @@ class Matcher:
 class Bot:
 
     def __init__(self, config):
+        self.subreddit_str = config['reddit']['subreddit']
+        self.post_ids = bq.get_post_ids_to_match(subreddit=self.subreddit_str)
         self.reader = Reader(config)
-        self.poster = Matcher(config)
+        self.matcher = Matcher(config)
+        self.poster = Poster(config)
 
     def run_crawling(self):
         self.reader.read_posts()
         self.reader.save_posts()
 
     def match_and_reply_one(self):
-        self.poster.process_one_post()
+        ids = bq.get_post_ids_to_match(self.subreddit_str)
+        if len(ids) > 0:
+            logging.info("Got one post to match")
+            ids = ids[0]
+            post_id, post_type = ids[0], ids[1]  # Most recent comment
+            if post_type == "comment":
+                post = self.reader.reddit.comment(id=post_id)
+                books_requested = utils.extract_braces(post.body)[0:config['reddit']['max_search_per_post']]
+            elif post_type == "submission":
+                post = self.reader.reddit.submission(id=post_id)
+                books_requested = utils.extract_braces(post.selftext)[0:config['reddit']['max_search_per_post']]
+            else:
+                raise ValueError
+            title_matches = self.matcher.process_queries(books_requested)
+            formatters = self.poster.get_formatters(title_matches, books_requested)
+            reply_text = self.poster.build_reply(title_matches, formatters)
+            logging.info(f'Posting: {reply_text}')
+            # hijack_post = self.reddit.comment(id='jysq9m0')
+            # reply = self.post_reply(hijack_post, post.body + '\n########################\n\n' + reply_text)
+            reply = self.poster.post_reply(post, reply_text)
+            self.poster.monitoring_after_reply(post, post_type, reply, formatters)
+        else:
+            logging.info("bq.get_post_ids_to_match returned empty string")

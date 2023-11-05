@@ -28,5 +28,10 @@ def partial_ratio(s1, s2):
 def alphanumeric(s):
     return re.sub(r'[^a-zA-Z0-9\s]', '', s, flags=re.UNICODE)
 
+def extract_last_name(s):
+    try:
+        return next(word for word in reversed(s.split()) if len(word) >= 2)
+    except:
+        return s
 
 
