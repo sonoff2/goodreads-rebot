@@ -1,4 +1,4 @@
-from grbot import bot, utils
+from grbot import bot
 import logging
 from grbot.configurator import config, setup_logging
 
