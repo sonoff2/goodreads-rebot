@@ -34,4 +34,14 @@ def extract_last_name(s):
     except:
         return s
 
+def remove_zeros(x):
+    if re.fullmatch(r'\d+\.0', x):
+        return re.sub(r'\.0$', '', x)
+    return x
+
+def clean_start(s, words_to_exclude):
+    for word in words_to_exclude:
+        if s.startswith(word):
+            return s[len(word):]
+    return s
 

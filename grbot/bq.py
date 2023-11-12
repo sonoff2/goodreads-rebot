@@ -2,9 +2,10 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 from google.cloud.bigquery.schema import SchemaField
 from google.api_core.exceptions import Conflict
-from grbot.utils import replace_nan
+from grbot.utils import replace_nan, remove_zeros
 from grbot.configurator import config
 import pandas as pd
+import pickle
 import logging
 
 TABLE_DIM_BOOKS = config['bq']['table_dim_books']
@@ -90,13 +91,14 @@ def sql_to_df(query, client=client):
 
 def download_book_db(table=TABLE_DIM_BOOKS, local_path=None):
     if local_path is not None:
-        df = pd.read_csv(local_path)
-        if "book_number" in df.columns:
-            df["book_number"] = df["book_number"].astype(str)
+        with open(local_path, 'rb') as handle:
+            df = pickle.load(handle)
     else:
         df = sql_to_df(f"""SELECT * FROM {table}""")
     for col in df.columns:
         df[col] = df[col].apply(lambda x: replace_nan(x, None))
+    if "book_number" in df.columns:
+        df['book_number'] = df['book_number'].apply(lambda x: remove_zeros(str(x)))
     return df.rename(columns = {
         'first_author': 'author',
         'short_title': 'book_title'
