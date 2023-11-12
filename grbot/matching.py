@@ -1,5 +1,5 @@
 from grbot.configurator import config
-from grbot.utils import alphanumeric, extract_last_name
+from grbot.utils import alphanumeric, extract_last_name, remove_zeros, clean_start
 from grbot import bq
 
 from collections import defaultdict
@@ -7,11 +7,16 @@ from rapidfuzz import process, fuzz
 import logging
 import numpy as np
 
+START_WORDS_TO_EXCLUDE = ['the ', 'a ', 'an ']
 
 class Query:
+
     def __init__(self, query):
         self.q = query
-        self.clean_q = alphanumeric(str.lower(query))
+        self.clean_q = clean_start(
+            s=alphanumeric(str.lower(query)).strip(),
+            words_to_exclude=START_WORDS_TO_EXCLUDE
+        )
         self.has_by = ' by ' in self.clean_q
 
 class Book:
@@ -19,7 +24,10 @@ class Book:
         self.id = book_id
 
         self.title = title
-        self.clean_title = alphanumeric(str.lower(self.title))
+        self.clean_title = clean_start(
+            s=alphanumeric(str.lower(self.title)),
+            words_to_exclude=START_WORDS_TO_EXCLUDE
+        )
         self.lateralized_title = ""
         self.short_title = ""
 
@@ -49,16 +57,27 @@ class Book:
 
 
 class Match:
-    def __init__(self, score=None, is_serie=None, book=None):
-        self.score = score
+    def __init__(self, fuzz_score=None, is_serie=None, book=None, title_was_shortened=None):
         self.is_serie = is_serie
+        self.title_was_shortened = title_was_shortened
         self.book = book
+        self.raw_score = fuzz_score
+        self.score = self.bonus_malus()
 
     def is_valid(self, threshold=config['matching']['min_ratio']):
         try:
             return self.score > threshold
         except:
             return False
+
+    def bonus_malus(self):
+        score = self.raw_score
+        if self.is_serie:
+            score += 5
+        if self.title_was_shortened:
+            score -= 5
+        return score
+
 
 class Matcher:
 
@@ -68,8 +87,8 @@ class Matcher:
 
         # Matching data:
         self.book_db = bq.download_book_db(local_path=config['bq']['local_path_dim_books'])
-        print(self.book_db.columns)
         self.series_db = bq.download_series_db(local_path=config['bq']['local_path_dim_series'])
+
         self.series_id_to_book_id = self.find_series_first_book()
 
         self.books_titles = self.init_book_list()
@@ -107,8 +126,8 @@ class Matcher:
             self.book_db['book_number'].str.contains("."), 2, np.where(
             self.book_db['book_number'].str.contains("-"), 3, 4
         )))
-        return self.book_db.sort_values(["series_id", "book_number_category", "book_number"])\
-                           .set_index("series_id").groupby("series_id").head(1)["book_id"].to_dict()
+        return self.book_db.set_index("series_id").sort_values(["book_number_category", "book_number"])\
+                           .groupby("series_id").head(1)["book_id"].to_dict()
 
     def process_queries(self, queries):
         return [
@@ -128,8 +147,6 @@ class Matcher:
                                      + self.match_process_filtered_on_author(search_series=True)
             if self.has_a_valid_match():
                 return self.pick_best_match(config['matching']['draw_settle_key'])
-            else:
-                self.possible_matches = []
 
         self.possible_matches += self.match_process(title=self.query.clean_q, search_series=False) \
                                  + self.match_process(title=self.query.clean_q, search_series=True)
@@ -143,9 +160,10 @@ class Matcher:
 
     def pick_best_match(self, draw_settle_key):
         self.enrich_possible_matches()
-        max_score = max(match.score for match in self.possible_matches)
+        self.possible_matches = [sorted(self.possible_matches, key=lambda match: match.score, reverse=True)[0]]
+        max_score = self.possible_matches[0].score
         if max_score < self.min_ratio:
-            return None
+            return self.possible_matches[0]
         else:
             best_matches = [match for match in self.possible_matches if match.score >= max_score]
             if len(best_matches) == 1:
@@ -156,7 +174,7 @@ class Matcher:
     def enrich_possible_matches(self):
         for match in self.possible_matches:
             if match.is_serie:
-                match.book.info = self.retrieve_info_from_book_db(id = self.series_id_to_book_id(match.book.id))
+                match.book.info = self.retrieve_info_from_book_db(id = self.series_id_to_book_id[match.book.id])
             else:
                 match.book.info = self.retrieve_info_from_book_db(id=match.book.id)
         return self
@@ -211,15 +229,20 @@ class Matcher:
                 return possible_matches_on_top
 
         # Step 2:
-        return self._match_fuzz(
+        results = self._match_fuzz(
             searched_string=title,
             search_book_list=search_list,
             is_serie=search_series,
             k=k, func=func
-        ) + self.match_start_of_titles(
+        )
+        if self.has_a_valid_match(results):
+            return results
+        else:
+            return self.match_start_of_titles(
             searched_string=title,
             search_list=search_list,
-            search_series=search_series)
+            search_series=search_series
+        )
 
     def match_start_of_titles(self, searched_string, search_list=None, search_series=False):
         return self._match_fuzz(
@@ -227,6 +250,7 @@ class Matcher:
             search_book_list=[book.shorten_title(at=len(searched_string)) for book in search_list],
             search_attribute = "short_title",
             is_serie=search_series,
+            title_was_shortened = True,
             func='full',
             lateralize=False,
             k=5)
@@ -236,10 +260,11 @@ class Matcher:
             searched_string,
             search_book_list,
             is_serie,
+            title_was_shortened=False,
             k=3,
             search_attribute='clean_title',
             func="partial",
-            lateralize=True
+            lateralize=True,
     ):
         scorer = fuzz.partial_ratio
         if func != "partial":
@@ -250,8 +275,9 @@ class Matcher:
         logging.info(f"Matching {searched_string} with a list of len {len(search_book_list)}")
         return [
             Match(
-                score=result[1],
+                fuzz_score=result[1],
                 is_serie=is_serie,
+                title_was_shortened=title_was_shortened,
                 book=search_book_list[result[2]]
             )
             for result in process.extract(
