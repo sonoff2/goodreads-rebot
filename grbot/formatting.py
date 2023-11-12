@@ -7,25 +7,25 @@ import textwrap
 
 class Formatter:
     def __init__(self, best_match, nth, total, book_requested):
-        logging.info(f"Received title_match : {best_match.book.title}, info = {best_match.book.info}")
         self.title = best_match.book.title
         self.nth = nth
         self.total = total
-        self.score = int(best_match.score)
+        self.score = int(best_match.raw_score)
         self.is_series = best_match.is_serie
         self.book_requested = book_requested
         self.book_info = best_match.book.info
+        logging.info(f"Created Formatter : {self.__dict__}")
 
     def build_long_title(self):
         if hasattr(self, "book_info"):
             if self.book_info["series_title"] is not None:
                 return "{} ({} #{})".format(
-                    self.book_info['short_title'],
+                    self.book_info['book_title'],
                     self.book_info['series_title'],
                     self.format_book_number(self.book_info['book_number'])
                 )
             else:
-                return self.book_info['short_title']
+                return self.book_info['book_title']
         else:
             return ""
 
@@ -38,7 +38,7 @@ class Formatter:
     def format_link(self):
         title = self.build_long_title()
         url = self.book_info["master_grlink"]
-        author = self.book_info["first_author"]
+        author = self.book_info["author"]
         nth = self.nth + 1
         total = self.total
         if total != 1:
@@ -48,7 +48,11 @@ class Formatter:
         score = self.score
 
         if score < config['matching']['min_ratio']:
-            return f"""{prefix}⚠ Could not *exactly* find "*{self.book_requested}*" but found [{title}]({url}) ^(&#40;with matching score of {score}%  &#41;)"""
+            display_result = score > 70
+            return (
+                f"""{prefix}⚠ Could not *exactly* find "*{self.book_requested}*" """
+                + f"""but found [{title}]({url}) ^(&#40;with matching score of {score}%  &#41;)"""*display_result
+            )
         else:
             return f"{prefix}**[{title}]({url}) by {author}** ^(&#40;Matching {score}% ☑️&#41;)"
 
