@@ -16,7 +16,7 @@ class Query:
         self.clean_q = clean_start(
             s=alphanumeric(str.lower(query)).strip(),
             words_to_exclude=START_WORDS_TO_EXCLUDE
-        )
+        ).replace('&', 'and')
         self.has_by = ' by ' in self.clean_q
 
 class Book:
@@ -256,15 +256,15 @@ class Matcher:
             k=5)
 
     def _match_fuzz(
-            self,
-            searched_string,
-            search_book_list,
-            is_serie,
-            title_was_shortened=False,
-            k=3,
-            search_attribute='clean_title',
-            func="partial",
-            lateralize=True,
+        self,
+        searched_string,
+        search_book_list,
+        is_serie,
+        title_was_shortened=False,
+        k=3,
+        search_attribute='clean_title',
+        func="partial",
+        lateralize=True,
     ):
         scorer = fuzz.partial_ratio
         if func != "partial":
