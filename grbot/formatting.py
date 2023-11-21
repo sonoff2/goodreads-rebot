@@ -1,33 +1,32 @@
 from grbot import bq
-from grbot.utils import config
+from grbot.configurator import config
 
 import logging
 import itertools
 import textwrap
+import urllib.parse
 
 class Formatter:
-    def __init__(self, title_match, nth, total, book_requested):
-        logging.info(f"Received title_match : {title_match}")
-        self.title = str(title_match[0]).rstrip("#")
+    def __init__(self, best_match, nth, total, book_requested):
+        self.title = best_match.book.title
         self.nth = nth
         self.total = total
-        self.score = int(title_match[1])
-        self.is_series = title_match[3]
+        self.score = int(best_match.raw_score)
+        self.is_series = best_match.is_serie
         self.book_requested = book_requested
-        if self.title is not None:
-            self.book_info = bq.get_book_info(self.title, self.is_series)
-            print(self.book_info)
+        self.book_info = best_match.book.info
+        logging.info(f"Created Formatter : {self.__dict__}")
 
     def build_long_title(self):
         if hasattr(self, "book_info"):
             if self.book_info["series_title"] is not None:
                 return "{} ({} #{})".format(
-                    self.book_info['short_title'],
+                    self.book_info['book_title'],
                     self.book_info['series_title'],
                     self.format_book_number(self.book_info['book_number'])
                 )
             else:
-                return self.book_info['short_title']
+                return self.book_info['book_title']
         else:
             return ""
 
@@ -40,7 +39,7 @@ class Formatter:
     def format_link(self):
         title = self.build_long_title()
         url = self.book_info["master_grlink"]
-        author = self.book_info["first_author"]
+        author = self.book_info["author"]
         nth = self.nth + 1
         total = self.total
         if total != 1:
@@ -50,9 +49,16 @@ class Formatter:
         score = self.score
 
         if score < config['matching']['min_ratio']:
-            return f"""{prefix}⚠ Could not find "{self.book_requested}" ; Found [{title}]({url}) ^(&#40;with bad matching score of {score}%  &#41;)"""
+            display_result = score > 70
+            goodreads_url = "https://www.goodreads.com/search?q="+urllib.parse.quote_plus(
+                self.book_requested.replace(' by', ''))
+            return (
+                f"""{prefix}⚠ Could not *exactly* find "*{self.book_requested}*" """
+                + f"""but found [{title}]({url}) ^(&#40;with matching score of {score}%  &#41;)"""*display_result
+                + f", see [related Goodreads search results]({goodreads_url}) instead."
+            )
         else:
-            return f"{prefix}**[{title}]({url}) by {author}** ^(&#40;Matching {score}% ☑️&#41;)"
+            return f"""{prefix}**[{title}]({url}) by {author}** ^(&#40;Matching {score}% ☑️&#41;)"""
 
     def format_description(self):
         description = self.book_info["summary"]
@@ -97,7 +103,7 @@ class Formatter:
             return ""
 
     def default_failed_text(self):
-        return "\n***Book not found** out of **60.000 books** in database: either too recent (2023), mispelled (check Goodreads) or too niche. Please note we are working hard to update the database to **200.000 books** by the end of this month.*\n"
+        return "\n^(*Possible reasons for mismatch: either too recent &#40;2023&#41;, mispelled &#40;check Goodreads&#41; or too niche. Please note we are working hard on a major update for beginning of Dec 2023.*)\n"
 
     def format_all(self):
         if self.score < config['matching']['min_ratio']:

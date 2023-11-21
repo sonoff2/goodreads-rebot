@@ -2,8 +2,10 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 from google.cloud.bigquery.schema import SchemaField
 from google.api_core.exceptions import Conflict
-from grbot.utils import config, replace_nan
+from grbot.utils import replace_nan, remove_zeros
+from grbot.configurator import config
 import pandas as pd
+import pickle
 import logging
 
 TABLE_DIM_BOOKS = config['bq']['table_dim_books']
@@ -87,6 +89,24 @@ def sql_to_df(query, client=client):
     logging.info(f"""Attempting to run the query : "{query.strip()}" """)
     return client.query(query).result().to_dataframe()
 
+def download_book_db(table=TABLE_DIM_BOOKS, local_path=None):
+    if local_path is not None:
+        with open(local_path, 'rb') as handle:
+            df = pickle.load(handle)
+    else:
+        df = sql_to_df(f"""SELECT * FROM {table}""")
+    for col in df.columns:
+        df[col] = df[col].apply(lambda x: replace_nan(x, None))
+    if "book_number" in df.columns:
+        df['book_number'] = df['book_number'].apply(lambda x: remove_zeros(str(x)))
+    return df.rename(columns = {
+        'first_author': 'author',
+        'short_title': 'book_title'
+    })
+
+def download_series_db(table=TABLE_DIM_SERIES, local_path=None):
+    return download_book_db(table=table, local_path=local_path)
+
 def get_books_by_author(table=TABLE_DIM_BOOKS, order_by='sort_n'):
     query = f"""
         SELECT lower(last_name) as author, lower(short_title) as title FROM {table} ORDER BY author ASC, {order_by} DESC
@@ -94,17 +114,24 @@ def get_books_by_author(table=TABLE_DIM_BOOKS, order_by='sort_n'):
     df = sql_to_df(query)
     return df.groupby('author')['title'].apply(list)
 
-def get_all_titles(table=TABLE_DIM_BOOKS, order_by='sort_n'):
+def get_series_by_author(table=TABLE_DIM_SERIES, order_by='sort_n'):
     query = f"""
-        SELECT lower(short_title) as short_title FROM {table} ORDER BY {order_by} DESC
+        SELECT lower(last_name) as author, lower(series_title) as title FROM {table} ORDER BY author ASC, {order_by} DESC
     """
-    return list(sql_to_df(query)['short_title'])
+    df = sql_to_df(query)
+    return df.groupby('author')['title'].apply(list)
+
+def get_book_titles(table=TABLE_DIM_BOOKS, order_by='sort_n'):
+    query = f"""
+        SELECT book_id, short_title as title, first_author as author FROM {table} ORDER BY {order_by} DESC
+    """
+    return sql_to_df(query)
 
 def get_series_titles(table=TABLE_DIM_SERIES):
     query = f"""
-        SELECT lower(series_title) as series_title from {table}
+        SELECT series_id, series_title, first_author as author from {table}
     """
-    return list(sql_to_df(query)['series_title'])
+    return sql_to_df(query)
 
 def get_last_timestamp(subreddit, table=TABLE_CRAWL_DATES):
     query = f"""
@@ -147,6 +174,34 @@ def remove_post_ids_to_match(ids, table=TABLE_TO_MATCH):
         my_list=ids,
         table=table
     )
+
+def get_info(book_id_list, table=TABLE_DIM_BOOKS):
+    if len(book_id_list) < 1:
+        return None
+    info_df = sql_to_df(f"""SELECT * FROM {table} WHERE book_id IN ({", ".join(
+        [str(book_id) for book_id in book_id_list]
+    )})""")
+    for col in info_df.columns:
+        info_df[col] = info_df[col].apply(lambda x: replace_nan(x, None))
+    return info_df.groupby('book_id').apply(lambda x: x.to_dict('records')[0]).to_dict()
+
+def book_id_from_series_id(
+    series_id,
+    table_book=TABLE_DIM_BOOKS
+):
+    return sql_to_df(f"""
+        SELECT book_id FROM {table_book}
+        WHERE series_id = {series_id}
+        ORDER BY 
+        CASE 
+            WHEN book_number REGEXP '^[0-9]+$' THEN 1         -- Normal integers
+            WHEN book_number REGEXP '^[0-9]+.[0-9]+$' THEN 2  -- "0.1" and prologues
+            WHEN book_number REGEXP '^[0-9]+-[0-9]+$' THEN 3  -- "1-3" and other compilations
+            ELSE 4  -- Other cases
+        END, book_number
+        LIMIT 1
+    """).loc[0, 'book_id']
+
 
 def get_book_info(title, is_series, order_by='sort_n'):
     if is_series:

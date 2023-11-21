@@ -1,7 +1,7 @@
-from grbot import bot, utils
+from grbot import bot
 import logging
 import time
-from grbot.utils import config
+from grbot.configurator import config, setup_logging
 
 def sleep(minutes):
     seconds = 60*minutes
@@ -35,8 +35,5 @@ def process_once():
         my_bot.match_and_reply_one()
 
 if __name__ == "__main__":
-
-    # Start logging
-    utils.setup_logging()
-
+    setup_logging()
     loop()
