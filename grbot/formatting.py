@@ -43,7 +43,7 @@ class Formatter:
         nth = self.nth + 1
         total = self.total
         if total != 1:
-            prefix = f"\#{nth}/{total}: "
+            prefix = f"\n\#{nth}/{total}: "
         else:
             prefix = ""
         score = self.score
