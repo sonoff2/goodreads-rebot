@@ -74,7 +74,7 @@ class Poster:
     def build_reply(self, title_matches, formatter_list, suffix = ""):
         logging.info(f"Building the reply for all matches: {title_matches}")
         #suffix = "\n\n*[Sep-23] I'm a revival bot of goodreads-bot, currently warming up its wires on old posts. Stay tuned for the launch. Bzzzt!*"
-        reply = "\n---\n".join([formatter.format_all() for formatter in formatter_list]) + suffix
+        reply = "\n\n---\n".join([formatter.format_all() for formatter in formatter_list]) + suffix
         return reply
 
     def post_reply(self, post, reply_text):
