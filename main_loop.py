@@ -13,10 +13,10 @@ def loop():
         print("\n\n################## STARTING A LOOP #####################\n\n")
         try:
             process_once()
-            sleep(minutes=4)
+            logging.info("Started Waiting")
+            sleep(minutes=3)
         except Exception as e:
-            print(e)
-            logging.info(e)
+            logging.info(f"ERROR IN LOOP ! {e}")
             sleep(minutes=8)
 
 def process_once():
@@ -33,6 +33,11 @@ def process_once():
     if config["flow"]["run_poster"]:
         logging.info("Started Matching")
         my_bot.match_and_reply_one()
+
+    # 3) Check scores and remove downvoted
+    if config["flow"]["run_check_scores"]:
+        logging.info("Started Score Check")
+        my_bot.check_scores()
 
 if __name__ == "__main__":
     setup_logging()

@@ -21,5 +21,10 @@ def main():
         logging.info("Started Matching")
         my_bot.match_and_reply_one()
 
+    # 3) Check scores and remove downvoted
+    if config["flow"]["run_check_scores"]:
+        logging.info("Started Score Check")
+        my_bot.check_scores()
+
 if __name__ == "__main__":
     main()
