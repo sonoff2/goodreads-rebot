@@ -86,7 +86,7 @@ def sanitize_for_sql(s):
     return s.replace("'", r"\'")
 
 def sql_to_df(query, client=client):
-    logging.info(f"""Attempting to run the query : "{query.strip()}" """)
+    logging.info(f"""Attempting to run the query : "{query[0:50].strip()}" """)
     return client.query(query).result().to_dataframe()
 
 def download_book_db(table=TABLE_DIM_BOOKS, local_path=None):
