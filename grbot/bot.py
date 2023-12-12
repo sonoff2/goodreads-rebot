@@ -65,10 +65,17 @@ class Poster:
         self.reddit = praw_wrapper.init(config)
         self.subreddit_str = config['reddit']['subreddit']
 
-    def get_formatters(self, title_matches, books_requested):
+    def get_formatters(self, title_matches, books_requested, all_books_recommended_along):
         return [
-            Formatter(best_match=best_match, nth=i, total=len(title_matches), book_requested=book_requested)
-            for i, (best_match, book_requested) in enumerate(zip(title_matches, books_requested))
+            Formatter(
+                best_match=best_match,
+                nth=i,
+                total=len(title_matches),
+                book_requested=book_requested,
+                books_recommended_info=books_recommended_info
+            )
+            for i, (best_match, book_requested, books_recommended_info)
+            in enumerate(zip(title_matches, books_requested, all_books_recommended_along))
         ]
 
     def build_reply(self, title_matches, formatter_list, suffix = ""):
@@ -128,7 +135,8 @@ class Bot:
             else:
                 raise ValueError
             title_matches = self.matcher.process_queries(books_requested)
-            formatters = self.poster.get_formatters(title_matches, books_requested)
+            books_recommended_along = self.matcher.recommend_books(title_matches, k=5)
+            formatters = self.poster.get_formatters(title_matches, books_requested, books_recommended_along)
             reply_text = self.poster.build_reply(title_matches, formatters)
             logging.info(f'Posting: {reply_text}')
             # hijack_post = self.reddit.comment(id='jysq9m0')

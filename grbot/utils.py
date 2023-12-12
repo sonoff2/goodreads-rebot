@@ -1,5 +1,8 @@
 import logging
+import numpy as np
 import re
+import pickle
+
 from rapidfuzz import process, fuzz
 
 
@@ -45,3 +48,35 @@ def clean_start(s, words_to_exclude):
             return s[len(word):]
     return s
 
+def load_pickle(path):
+    with open(path, 'rb') as handle:
+        r = pickle.load(handle)
+    return r
+
+def humanize_number(value, fraction_point=1):
+    try:
+        value = int(value)
+    except:
+        return np.nan
+    powers = [10 ** x for x in (12, 9, 6, 3, 0)]
+    human_powers = ('T', 'B', 'm', 'k', '')
+    is_negative = False
+    if not isinstance(value, float):
+        value = float(value)
+    if value < 0:
+        is_negative = True
+        value = abs(value)
+    for i, p in enumerate(powers):
+        if value >= p:
+            return_value = str(round(value / (p / (10.0 ** fraction_point))) / (10 ** fraction_point)) + human_powers[i]
+            break
+    if is_negative:
+        return_value = "-" + return_value
+
+    return return_value
+
+def replace_if_falsy(x, replace_value, func=None):
+    if str(x) in ['[]', 'None', 'nan', '', '<NA>']:
+        return replace_value
+    else:
+        return func(x) if func is not None else x

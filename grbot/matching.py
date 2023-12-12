@@ -1,5 +1,5 @@
 from grbot.configurator import config
-from grbot.utils import alphanumeric, extract_last_name, remove_zeros, clean_start
+from grbot.utils import alphanumeric, extract_last_name, load_pickle, clean_start
 from grbot import bq
 
 from collections import defaultdict
@@ -62,7 +62,7 @@ class Match:
         self.title_was_shortened = title_was_shortened
         self.book = book
         self.raw_score = fuzz_score
-        self.score = self.bonus_malus()
+        self.score = None
 
     def is_valid(self, threshold=config['matching']['min_ratio']):
         try:
@@ -70,22 +70,25 @@ class Match:
         except:
             return False
 
-    def bonus_malus(self):
+    def bonus_malus_score(self):
         score = self.raw_score
         if self.is_serie:
-            score += 5
+            score -= 1
         if self.title_was_shortened:
             score -= 5
-        return score
+        if self.book.info['ratings_count'] >= 100000:
+            score += 6
+        self.score = score
+        return self
 
 
 class Matcher:
 
     def __init__(self, config=config):
 
-        self.query = None
-
         # Matching data:
+        self.w2v = load_pickle(config['reco']['w2v_path'])
+
         self.book_db = bq.download_book_db(local_path=config['bq']['local_path_dim_books'])
         self.series_db = bq.download_series_db(local_path=config['bq']['local_path_dim_series'])
 
@@ -101,6 +104,8 @@ class Matcher:
         self.author_min_ratio = config['matching']['author_min_ratio']
 
         # Result
+
+        self.query = None
         self.possible_matches = [] # List of Match
         self.result = None         # Book
 
@@ -128,6 +133,29 @@ class Matcher:
         )))
         return self.book_db.set_index("series_id").sort_values(["book_number_category", "book_number"])\
                            .groupby("series_id").head(1)["book_id"].to_dict()
+
+    def recommend_books(self, title_matches, k):
+        """
+        Get Top k recommendations (using w2v model trained separately) for each title_match
+        One reco is a dict format (Book.info() format)
+        :param title_matches:
+        :return: [ [Top k reco for title_match1], [Top k reco for title_match2], ..]
+        """
+        recommendations = []
+
+        for title_match in title_matches:
+            book_id = title_match.book.id
+
+            if book_id in self.w2v.key_to_index:
+                recommendations.append([
+                    self.retrieve_info_from_book_db(id=reco[0]) for reco in self.w2v.most_similar(book_id, topn=k)
+                ])
+            else:
+                print(f"Key '{book_id}' not present in vocabulary")
+                recommendations.append([])
+                # Handle the case when the key is not present in the vocabulary, e.g., provide default recommendations
+
+        return recommendations
 
     def process_queries(self, queries):
         return [
@@ -159,7 +187,6 @@ class Matcher:
         return any([match.is_valid() for match in (self.possible_matches if matches_list is None else matches_list)])
 
     def pick_best_match(self, draw_settle_key):
-        self.enrich_possible_matches()
         self.possible_matches = [sorted(self.possible_matches, key=lambda match: match.score, reverse=True)[0]]
         max_score = self.possible_matches[0].score
         if max_score < self.min_ratio:
@@ -171,13 +198,15 @@ class Matcher:
             else:
                 return sorted(best_matches, key=lambda match: match.book.info[draw_settle_key], reverse=True)[0]
 
-    def enrich_possible_matches(self):
-        for match in self.possible_matches:
+    def enrich_match_list(self, match_list):
+        logging.info("starting enrich match list")
+        for match in match_list:
             if match.is_serie:
-                match.book.info = self.retrieve_info_from_book_db(id = self.series_id_to_book_id[match.book.id])
+                match.book.info = self.retrieve_info_from_book_db(id=self.series_id_to_book_id[match.book.id])
             else:
                 match.book.info = self.retrieve_info_from_book_db(id=match.book.id)
-        return self
+            match.bonus_malus_score()
+        return match_list
 
     def retrieve_info_from_book_db(self, id):
         return self.book_db.set_index('book_id').loc[id].to_dict()
@@ -267,13 +296,15 @@ class Matcher:
         lateralize=True,
     ):
         scorer = fuzz.partial_ratio
+        if is_serie and searched_string[-7:] == ' series':
+            searched_string = searched_string[0:-7]
         if func != "partial":
             scorer = fuzz.ratio
         if lateralize:
             search_book_list = [book.lateralize_title(until=len(searched_string)) for book in search_book_list]
             search_attribute = "lateralized_title"
         logging.info(f"Matching {searched_string} with a list of len {len(search_book_list)}")
-        return [
+        matches = [
             Match(
                 fuzz_score=result[1],
                 is_serie=is_serie,
@@ -286,5 +317,6 @@ class Matcher:
                 scorer=scorer,
                 limit=k)
             ]
+        return self.enrich_match_list(matches)
 
 
