@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import os
 
 def setup_logging():
     # 'INFO' level by default, could be specified by the user (for later)
@@ -41,3 +42,7 @@ except:
         file_blob = storage.Blob('config.json', bucket)
         download_data = file_blob.download_as_string().decode()
         config = json.loads(download_data)
+
+version_file_path = os.path.join(os.path.dirname(__file__), '..', 'VERSION')
+with open(version_file_path, 'r') as version_file:
+    config['version'] = version_file.read().strip()
