@@ -116,6 +116,16 @@ class Bot:
         self.matcher = Matcher(config)
         self.poster = Poster(config)
 
+    def check_scores(self, comment_limit=50, karma_threshold=1):
+        """Check recently posted comments and delete if the karma score is below given threshold."""
+        logging.info("Checking comment scores...")
+
+        for posted_comment in self.poster.reddit.user.me().comments.new(limit=comment_limit):
+            if posted_comment.score < karma_threshold:
+                posted_comment.delete()
+                url = posted_comment.permalink.replace(posted_comment.id, posted_comment.parent_id[3:])
+                logging.info("Downvoted comment removed: https://www.reddit.com" + url)
+
     def run_crawling(self):
         self.reader.read_posts()
         self.reader.save_posts()
