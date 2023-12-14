@@ -1,4 +1,4 @@
-from grbot import praw_wrapper, bq, utils, matching
+from grbot import praw_wrapper, bq, utils
 from grbot.configurator import config
 from grbot.formatting import Formatter
 from grbot.matching import Matcher
@@ -10,49 +10,59 @@ class Reader:
 
     def __init__(self, config=config):
         self.reddit = praw_wrapper.init(config)
-        self.subreddit_str = config['reddit']['subreddit']
-        self.subreddit = self.reddit.subreddit(self.subreddit_str)
+        self.subreddits = {sub: self.reddit.subreddit(sub) for sub in config['reddit']['subreddits']}
         self.limit = config['reddit']['limit']
-        self.last_timestamp = bq.get_last_timestamp(self.subreddit_str)
+        self.last_timestamps = bq.get_last_timestamps(list(self.subreddits.keys()))
         self.latest_comments = []
         self.latest_submissions = []
 
     def read_posts(self):
+
+        for sub in list(self.subreddits.keys()):
+            self.read_posts_from(sub)
+
+        if self.latest_submissions or self.latest_comments:
+            new_timestamps = pd.DataFrame(
+                data = [[post.subreddit.display_name, post.created_utc]
+                         for post in (self.latest_submissions + self.latest_comments)],
+                columns = ["subreddit", "crawl_timestamp"]
+            ).groupby('subreddit')['crawl_timestamp'].max().reset_index()
+            logging.info(f'Updating timestamp with {new_timestamps}')
+            bq.update_timestamps(new_timestamps)
+
+            logging.info(f'Got {len(self.latest_submissions)} posts and {len(self.latest_comments)} comments')
+
+            self.latest_comments, self.latest_submissions = [], []
+
+
+    def read_posts_from(self, sub):
         latest_comments = []
-        for comment in self.subreddit.comments(limit=self.limit):
-            if comment.created_utc >= self.last_timestamp:
+        for comment in self.subreddits[sub].comments(limit=self.limit):
+            if comment.created_utc >= self.last_timestamps[sub]:
                 latest_comments.append(comment)
             else:
                 break
-        self.latest_comments = latest_comments
+        self.latest_comments += latest_comments
 
         latest_submissions = []
-        for submission in self.subreddit.new(limit=self.limit):
-            if submission.created_utc >= self.last_timestamp:
+        for submission in self.subreddits[sub].new(limit=self.limit):
+            if submission.created_utc >= self.last_timestamps[sub]:
                 latest_submissions.append(submission)
             else:
                 break
-        self.latest_submissions = latest_submissions
+        self.latest_submissions += latest_submissions
 
-        if latest_submissions or latest_comments:
-            max_timestamp = max(post.created_utc for post in latest_comments + latest_submissions)
-            logging.info(f'Updating timestamp with {max_timestamp}')
-            bq.update_timestamp(self.subreddit_str, max_timestamp)
-
-        logging.info(f'Got {len(latest_submissions)} posts and {len(latest_comments)} comments')
         return self
 
     def save_posts(self):
-        filtered_comments = [comment for comment in self.latest_comments
-                             if "{{" in comment.body and "}}" in comment.body]
-        filtered_submissions = [submission for submission in self.latest_submissions
-                                if "{{" in submission.selftext and "}}" in submission.selftext]
+        filtered_comments = [comment for comment in self.latest_comments if utils.comment_triggers(comment)]
+        filtered_submissions = [submi for submi in self.latest_submissions if utils.comment_triggers(submi)]
 
         if filtered_comments or filtered_submissions:
             # Store IDs to treat in Big Query
-            comment_ids = [[self.subreddit_str, comment.id, comment.created_utc, 'comment']
+            comment_ids = [[comment.subreddit.display_name, comment.id, comment.created_utc, 'comment']
                            for comment in filtered_comments]
-            submission_ids = [[self.subreddit_str, submission.id, submission.created_utc, 'submission']
+            submission_ids = [[submission.subreddit.display_name, submission.id, submission.created_utc, 'submission']
                               for submission in filtered_submissions]
             bq.save_post_ids_to_match(comment_ids + submission_ids)
 
@@ -63,7 +73,7 @@ class Poster:
 
     def __init__(self, config):
         self.reddit = praw_wrapper.init(config)
-        self.subreddit_str = config['reddit']['subreddit']
+        self.subreddit_str = config['reddit']['subreddits'] ### WARNING
 
     def get_formatters(self, title_matches, books_requested, all_books_recommended_along):
         return [
@@ -110,11 +120,14 @@ class Poster:
 class Bot:
 
     def __init__(self, config):
-        self.subreddit_str = config['reddit']['subreddit']
-        self.post_ids = bq.get_post_ids_to_match(subreddit=self.subreddit_str)
-        self.reader = Reader(config)
-        self.matcher = Matcher(config)
-        self.poster = Poster(config)
+        self.subreddits_str = config['reddit']['subreddits']
+        if config['flow']['run_reader']:
+            self.reader = Reader(config)
+        if config['flow']['run_matcher']:
+            self.post_ids = bq.get_post_ids_to_match(subreddits=self.subreddits_str)
+            self.matcher = Matcher(config)
+        if config['flow']['run_poster']:
+            self.poster = Poster(config)
 
     def check_scores(self, comment_limit=50, karma_threshold=1):
         """Check recently posted comments and delete if the karma score is below given threshold."""
@@ -130,12 +143,9 @@ class Bot:
         self.reader.read_posts()
         self.reader.save_posts()
 
-    def match_and_reply_one(self):
-        ids = bq.get_post_ids_to_match(self.subreddit_str)
-        if len(ids) > 0:
-            logging.info("Got one post to match")
-            ids = ids[0]
-            post_id, post_type = ids[0], ids[1]  # Most recent comment
+    def match_and_reply_one_by_sub(self):
+        for post_to_match in bq.get_post_ids_to_match(self.subreddits_str):
+            _, post_id, post_type = post_to_match
             if post_type == "comment":
                 post = self.reader.reddit.comment(id=post_id)
                 books_requested = utils.extract_braces(post.body)[0:config['reddit']['max_search_per_post']]

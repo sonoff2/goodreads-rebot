@@ -80,3 +80,11 @@ def replace_if_falsy(x, replace_value, func=None):
         return replace_value
     else:
         return func(x) if func is not None else x
+
+def comment_triggers(comment):
+    txt = comment.selftext if is_submission(comment) else comment.body
+    txt = txt.replace("((", "{{").replace("))", "}}")
+    if ("{{" in txt) and ("}}" in txt):
+        return True
+    else:
+        return False

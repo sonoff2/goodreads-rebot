@@ -9,20 +9,21 @@ def sleep(minutes):
         time.sleep(1)
 
 def loop():
+
+    # Intiate instances
+    my_bot = bot.Bot(config)
+
     while True:
         print("\n\n################## STARTING A LOOP #####################\n\n")
         try:
-            process_once()
+            process_once(my_bot)
             logging.info("Started Waiting")
             sleep(minutes=3)
         except Exception as e:
             logging.info(f"ERROR IN LOOP ! {e}")
             sleep(minutes=8)
 
-def process_once():
-
-    # Intiate instances
-    my_bot = bot.Bot(config)
+def process_once(my_bot):
 
     # 1) Crawl comments
     if config["flow"]["run_reader"]:

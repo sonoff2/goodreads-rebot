@@ -19,7 +19,7 @@ def main():
     # 2) Answer one
     if config["flow"]["run_poster"]:
         logging.info("Started Matching")
-        my_bot.match_and_reply_one()
+        my_bot.match_and_reply_one_by_sub()
 
     # 3) Check scores and remove downvoted
     if config["flow"]["run_check_scores"]:
