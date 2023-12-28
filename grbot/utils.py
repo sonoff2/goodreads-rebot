@@ -1,4 +1,3 @@
-import logging
 import numpy as np
 import re
 import pickle
@@ -12,17 +11,18 @@ def is_submission(reddit_post):
     else:
         return False
 
-
-# MATCHING TITLES UTILS:
-
 def replace_nan(var, replacement="?"):
     if str(var) in ['nan', 'None', '<NA>', 'NaN', 'NA']:
         return replacement
     else:
         return var
 
+def replace_triggers(txt):
+    return txt.replace("((", "{{").replace("))", "}}")
+
 def extract_braces(comment_body):
-    sub_parts = re.findall(r'\{\{([^}]*)\}\}', comment_body)
+    txt = replace_triggers(comment_body)
+    sub_parts = re.findall(r'\{\{([^}]*)\}\}', txt)
     return sub_parts
 
 def partial_ratio(s1, s2):
@@ -75,16 +75,17 @@ def humanize_number(value, fraction_point=1):
 
     return return_value
 
-def replace_if_falsy(x, replace_value, func=None):
+def replace_if_falsy(x, replace_value, func=lambda x: x):
     if str(x) in ['[]', 'None', 'nan', '', '<NA>']:
         return replace_value
     else:
-        return func(x) if func is not None else x
+        return func(x)
 
-def comment_triggers(comment):
-    txt = comment.selftext if is_submission(comment) else comment.body
-    txt = txt.replace("((", "{{").replace("))", "}}")
-    if ("{{" in txt) and ("}}" in txt):
-        return True
-    else:
-        return False
+def comment_triggers(comment, excluded_authors):
+    txt = replace_triggers(comment.selftext if is_submission(comment) else comment.body)
+    return (
+            ("{{" in txt)
+            and ("}}" in txt)
+            and (comment.author.name not in excluded_authors)
+            and ('github' not in txt.lower()) # To exclude the bot messages itself
+    )

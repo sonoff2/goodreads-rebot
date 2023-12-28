@@ -19,6 +19,15 @@ class Query:
         ).replace('&', 'and')
         self.has_by = ' by ' in self.clean_q
 
+class Queries:
+
+    def __init__(self, books_requested):
+        self.books_requested = books_requested
+
+    def one_has_no_by(self):
+        queries = [Query(book) for book in self.books_requested]
+        return any([not query.has_by for query in queries])
+
 class Book:
     def __init__(self, book_id, title=None, author=None, is_series=False):
         self.id = book_id
@@ -151,7 +160,7 @@ class Matcher:
                     self.retrieve_info_from_book_db(id=reco[0]) for reco in self.w2v.most_similar(book_id, topn=k)
                 ])
             else:
-                print(f"Key '{book_id}' not present in vocabulary")
+                logging.info(f"Key '{book_id}' not present in vocabulary")
                 recommendations.append([])
                 # Handle the case when the key is not present in the vocabulary, e.g., provide default recommendations
 

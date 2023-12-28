@@ -10,15 +10,15 @@ def sleep(minutes):
 
 def loop():
 
-    # Intiate instances
+    # Initiate instances
     my_bot = bot.Bot(config)
 
     while True:
-        print("\n\n################## STARTING A LOOP #####################\n\n")
+        logging.info("\n\n################## STARTING A LOOP #####################\n\n")
         try:
             process_once(my_bot)
             logging.info("Started Waiting")
-            sleep(minutes=3)
+            sleep(minutes=0.2)
         except Exception as e:
             logging.info(f"ERROR IN LOOP ! {e}")
             sleep(minutes=8)
@@ -33,7 +33,7 @@ def process_once(my_bot):
     # 2) Answer one
     if config["flow"]["run_poster"]:
         logging.info("Started Matching")
-        my_bot.match_and_reply_one()
+        my_bot.match_and_reply_one_by_sub()
 
     # 3) Check scores and remove downvoted
     if config["flow"]["run_check_scores"]:

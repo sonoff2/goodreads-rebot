@@ -29,20 +29,20 @@ def append_to_table(df, table, schema_dic, client=client):
     ]
     logging.info(f"Attempting to append df {df} to table {table} with schema {schema}")
     errors = client.insert_rows_from_dataframe(table_obj, df, selected_fields=schema)
-    if errors == []:
-        print("Rows appended successfully")
+    if errors == [[]]:
+        logging.info("Rows appended successfully")
     else:
-        print("Encountered errors:", errors)
+        logging.info(f"Encountered errors: {errors}")
     return errors
 
 def delete_from_table(column, my_list, table, client=client):
     delete_query = f"""DELETE FROM {table} WHERE CAST({column} AS STRING) IN ('{"', '".join(my_list)}')"""
     logging.info(f"Running query : {delete_query}")
     query_job = client.query(delete_query)
-    if query_job.errors == []:
-        print("Rows deleted successfully")
+    if query_job.errors is None:
+        logging.info("Rows deleted successfully")
     else:
-        print("Encountered errors:", query_job.errors)
+        logging.warn(f"Encountered errors: {query_job.errors}")
     return query_job.errors
 
 
@@ -56,7 +56,7 @@ def overwrite_populate(df, table_id, schema_dic, client=client):
     if table_bq_id in [table.table_id for table in tables]:
         table_ref = client.dataset(dataset_id).table(table_bq_id)
         client.delete_table(table_ref)
-        print("Table {}:{} deleted.".format(dataset_id, table_bq_id))
+        logging.info("Table {}:{} deleted.".format(dataset_id, table_bq_id))
 
     # Create a new table with the schema
     table = bigquery.Table(f"{project_id}.{dataset_id}.{table_bq_id}")
@@ -67,18 +67,18 @@ def overwrite_populate(df, table_id, schema_dic, client=client):
     # Create the table in BigQuery
     try:
         table = client.create_table(table)
-        print("Created table {}".format(table.table_id))
+        logging.info("Created table {}".format(table.table_id))
     except Conflict as error:
-        print("Error writing table on BigQuery: ", error)
+        logging.warn("Error writing table on BigQuery: ", error)
         return
 
     try:
         # Trying to write a df on Bigquery
         client.load_table_from_dataframe(df, table).result()
-        print(f"{table_id} populated successfully in BigQuery.")
+        logging.info(f"{table_id} populated successfully in BigQuery.")
 
     except Exception as e:
-        print(f"Populating failed with error {e}")
+        logging.warn(f"Populating failed with error {e}")
 
     return
 
@@ -141,7 +141,7 @@ def save_post_ids_to_match(post_ids, table=TABLE_TO_MATCH):
         schema_dic={"subreddit": "STRING", "post_id": 'STRING', 'post_timestamp': 'INTEGER', "post_type": 'STRING'}
     )
 
-def get_post_ids_to_match(subreddits, table=TABLE_TO_MATCH, table_already_replied=TABLE_REPLY_LOGS):
+def get_posts_to_match(subreddits, table=TABLE_TO_MATCH, table_already_replied=TABLE_REPLY_LOGS):
     df = sql_to_df(f"""
         SELECT T.* FROM {table} T 
         LEFT JOIN {table_already_replied} T2 

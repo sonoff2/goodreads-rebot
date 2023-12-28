@@ -1,11 +1,49 @@
-from grbot import bq
 from grbot.configurator import config
+from grbot.matching import Queries
 from grbot.utils import humanize_number, replace_if_falsy
 
-import logging
 import itertools
 import textwrap
 import urllib.parse
+
+class Reply:
+
+    BY_PREFIX = (
+        "🚨 Note to u/{author}: including the **author name** after a **\"by\"** keyword will help the bot find "
+        "the good book! (simply like this *{{{{Call me by your name by Andre Aciman}}}})"
+    )
+
+    STD_SUFFIX = (
+        """^("""
+        # """"**NEW** 👉 Downvote to remove | """
+        """[Feedback](https://www.reddit.com/user/goodreads-rebot) | """
+        """[GitHub](https://github.com/sonoff2/goodreads-rebot) | """
+        """["The Bot is Back!?"](https://www.reddit.com/r/suggestmeabook/comments/16qe09p/meta_post_hello_again_humans/) | """
+        f"""v{config['version']}"""
+        """)"""
+    )
+
+    def __init__(self, formatters, author):
+        self.formatters = formatters
+        self.author = author
+        self.prefix = self.build_prefix()
+        self.suffix = self.build_suffix()
+
+    def build_prefix(self):
+        if Queries([formatter.book_requested for formatter in self.formatters]).one_has_no_by():
+            return Reply.BY_PREFIX.format(author = self.author)
+        else:
+            return ""
+
+    def build_suffix(self):
+        return Reply.STD_SUFFIX
+
+    def text(self):
+        prefix = (self.prefix + "\n\n---\n\n" if len(self.prefix) > 0 else "")
+        recos = "\n\n---\n".join([formatter.format_all() for formatter in self.formatters])
+        suffix = ("\n" + self.suffix if len(self.suffix) > 0 else "")
+        return prefix + recos + suffix
+
 
 class Formatter:
     def __init__(self, best_match, nth, total, book_requested, books_recommended_info):
@@ -18,7 +56,6 @@ class Formatter:
         self.book_info = best_match.book.info
         self.reco_separators = (', ', "") if (self.total > 1) else ("", "\n>  \- ")
         self.books_recommended_info = books_recommended_info # List of dict [{'short_title': .., 'author': ..}]
-        logging.info(f"Created Formatter : {self.__dict__}")
 
     def shorten_desc(self, description):
         if self.total > 1:
@@ -94,7 +131,7 @@ class Formatter:
         else:
             return ""
 
-    def format_recos_emb(self):
+    def format_recos(self):
         if len(self.books_recommended_info) > 0:
             start = f"""\n> **Top {len(self.books_recommended_info)} recommended:**  """
             separator_1, separator_2 = self.reco_separators
@@ -106,33 +143,6 @@ class Formatter:
         else:
             return ""
 
-    def format_recos(self):
-        recos = bq.get_top_2_books(self.book_info['master_grlink'])
-        if len(recos) >= 2:
-            title1 = recos.iloc[0, recos.columns.get_loc('title')]
-            url1 = recos.iloc[0, recos.columns.get_loc('grlink')]
-            author1 = recos.iloc[0, recos.columns.get_loc('author')]
-            title2 = recos.iloc[1, recos.columns.get_loc('title')]
-            url2 = recos.iloc[1, recos.columns.get_loc('grlink')]
-            author2 = recos.iloc[1, recos.columns.get_loc('author')]
-            return f"\n> **Top 2 recommended-along**: [{title1}]({url1}) by {author1}, [{title2}]({url2}) by {author2}"
-        else:
-            return ""
-
-    def format_links(self):
-        if self.nth + 1 == self.total:
-            return (
-                """\n^("""
-                #""""**NEW** 👉 Downvote to remove | """
-                """[Feedback](https://www.reddit.com/user/goodreads-rebot) | """
-                """[GitHub](https://github.com/sonoff2/goodreads-rebot) | """
-                """["The Bot is Back!?"](https://www.reddit.com/r/suggestmeabook/comments/16qe09p/meta_post_hello_again_humans/) | """
-                f"""v{config['version']}"""
-                """)"""
-            )
-        else:
-            return ""
-
     def default_failed_text(self):
         return "\n^(*Possible reasons for mismatch: either too recent &#40;2023&#41;, mispelled &#40;check Goodreads&#41; or too niche. Please note we are working hard on a major update for beginning of Dec 2023.*)\n"
 
@@ -140,8 +150,7 @@ class Formatter:
         if self.score < config['matching']['min_ratio']:
             parts = [
                 self.format_link(),
-                self.default_failed_text(),
-                self.format_links()
+                self.default_failed_text()
             ]
         else:
             parts = [
@@ -149,7 +158,6 @@ class Formatter:
                 self.format_book_footer(),
                 self.format_description(),
                 self.format_tags(),
-                self.format_recos_emb(),
-                self.format_links()
+                self.format_recos()
             ]
         return '\n'.join([part for part in parts if len(part) > 1])
