@@ -18,7 +18,7 @@ def loop():
         try:
             process_once(my_bot)
             logging.info("Started Waiting")
-            sleep(minutes=0.2)
+            sleep(minutes=3)
         except Exception as e:
             logging.info(f"ERROR IN LOOP ! {e}")
             sleep(minutes=8)
