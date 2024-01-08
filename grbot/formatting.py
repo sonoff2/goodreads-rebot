@@ -10,7 +10,7 @@ class Reply:
 
     BY_PREFIX = (
         "🚨 Note to u/{author}: including the **author name** after a **\"by\"** keyword will help the bot find "
-        "the good book! (simply like this *{{{{Call me by your name by Andre Aciman}}}})"
+        "the good book! (simply like this *{{{{Call me by your name by Andre Aciman}}}}*)"
     )
 
     STD_SUFFIX = (
@@ -41,7 +41,7 @@ class Reply:
     def text(self):
         prefix = (self.prefix + "\n\n---\n\n" if len(self.prefix) > 0 else "")
         recos = "\n\n---\n".join([formatter.format_all() for formatter in self.formatters])
-        suffix = ("\n" + self.suffix if len(self.suffix) > 0 else "")
+        suffix = ("\n\n" + self.suffix if len(self.suffix) > 0 else "")
         return prefix + recos + suffix
 
 
@@ -144,7 +144,7 @@ class Formatter:
             return ""
 
     def default_failed_text(self):
-        return "\n^(*Possible reasons for mismatch: either too recent &#40;2023&#41;, mispelled &#40;check Goodreads&#41; or too niche. Please note we are working hard on a major update for beginning of Dec 2023.*)\n"
+        return "\n^(*Possible reasons for mismatch: either too recent &#40;2023&#41;, mispelled &#40;check Goodreads&#41; or too niche.*)\n"
 
     def format_all(self):
         if self.score < config['matching']['min_ratio']:
