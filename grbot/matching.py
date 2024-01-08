@@ -26,7 +26,7 @@ class Queries:
 
     def one_has_no_by(self):
         queries = [Query(book) for book in self.books_requested]
-        return any([not query.has_by for query in queries])
+        return any([(not query.has_by) for query in queries])
 
 class Book:
     def __init__(self, book_id, title=None, author=None, is_series=False):
