@@ -19,7 +19,8 @@ class Reply:
         """[Feedback](https://www.reddit.com/user/goodreads-rebot) | """
         """[GitHub](https://github.com/sonoff2/goodreads-rebot) | """
         """["The Bot is Back!?"](https://www.reddit.com/r/suggestmeabook/comments/16qe09p/meta_post_hello_again_humans/) | """
-        f"""v{config['version']}"""
+        f"""v{config['version']} | """
+        #"""Sorry for delay !"""
         """)"""
     )
 
@@ -29,8 +30,8 @@ class Reply:
         self.prefix = self.build_prefix()
         self.suffix = self.build_suffix()
 
-    def build_prefix(self):
-        if Queries([formatter.book_requested for formatter in self.formatters]).one_has_no_by():
+    def build_prefix(self, allow_alert = False):
+        if allow_alert and Queries([formatter.book_requested for formatter in self.formatters]).one_has_no_by():
             return Reply.BY_PREFIX.format(author = self.author)
         else:
             return ""
