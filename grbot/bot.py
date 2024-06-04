@@ -123,6 +123,11 @@ class Poster:
         bq.remove_post_ids_to_match(ids=[post.id])
         return
 
+    def classify_as_error(self, post, error):
+        bq.add_log_in_error_table(post = post, error= error)
+        bq.remove_post_ids_to_match(ids=[post.id])
+        return
+
 class Bot:
 
     def __init__(self, config):
@@ -150,6 +155,7 @@ class Bot:
 
     def match_and_reply_one_by_sub(self):
         for (post_subreddit, post_id, post_type) in bq.get_posts_to_match(self.subreddits_str):
+            logging.info("Working on post_id = " + post_id)
             if post_type == "comment":
                 post = self.reader.reddit.comment(id=post_id)
                 books_requested = utils.extract_braces(post.body)[0:config['reddit']['max_search_per_post']]
@@ -158,14 +164,17 @@ class Bot:
                 books_requested = utils.extract_braces(post.selftext)[0:config['reddit']['max_search_per_post']]
             else:
                 raise ValueError
-            if len(books_requested) == 0:
-                self.poster.monitoring_after_reply(post, post_type, None, None)
-            else:
-                title_matches = self.matcher.process_queries(books_requested)
-                books_recommended_along = self.matcher.recommend_books(title_matches, k=5)
-                formatters = self.poster.get_formatters(title_matches, books_requested, books_recommended_along)
-                reply_text = Reply(formatters, post.author.name).text()
-                reply = self.poster.post_reply(post, reply_text)
-                self.poster.monitoring_after_reply(post, post_type, reply, formatters)
+            try:
+                if len(books_requested) == 0:
+                    self.poster.monitoring_after_reply(post, post_type, None, None)
+                else:
+                    title_matches = self.matcher.process_queries(books_requested)
+                    books_recommended_along = self.matcher.recommend_books(title_matches, k=5)
+                    formatters = self.poster.get_formatters(title_matches, books_requested, books_recommended_along)
+                    reply_text = Reply(formatters, post.author.name).text()
+                    reply = self.poster.post_reply(post, reply_text)
+                    self.poster.monitoring_after_reply(post, post_type, reply, formatters)
+            except Exception as e:
+                self.poster.classify_as_error(post=post, error=e)
         else:
             logging.info("bq.get_post_ids_to_match returned empty string")
