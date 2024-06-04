@@ -2,8 +2,9 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 from google.cloud.bigquery.schema import SchemaField
 from google.api_core.exceptions import Conflict
-from grbot.utils import replace_nan, remove_zeros
+from grbot.utils import replace_nan, remove_zeros, is_submission
 from grbot.configurator import config
+
 import pandas as pd
 import pickle
 import logging
@@ -13,6 +14,7 @@ TABLE_DIM_SERIES = config['bq']['table_dim_series']
 TABLE_TO_MATCH = config['bq']['table_to_match']
 TABLE_CRAWL_DATES = config['bq']['table_crawl_dates']
 TABLE_REPLY_LOGS = config['bq']['table_reply_logs']
+TABLE_ERROR_LOGS = config['bq']['table_error_logs']
 PROJECT_ID = config['bq']['project_id']
 
 if config['flow']['mode'] == 'local':
@@ -164,6 +166,23 @@ def remove_post_ids_to_match(ids, table=TABLE_TO_MATCH):
         column='post_id',
         my_list=ids,
         table=table
+    )
+
+def add_log_in_error_table(post, error):
+    schema_dic = {"subreddit": "STRING", "post_id": 'STRING', "post_type": 'STRING',
+                  "post_content": 'STRING', "author": "STRING", "error": 'STRING'}
+    df = {
+        "subreddit": [post.subreddit],
+        "post_id" : [post.id],
+        "post_type" : [is_submission(post)],
+        "post_content": [post.selftext if is_submission(post) else post.body],
+        "author": [post.author],
+        "error": [error]
+    }
+    return append_to_table(
+        df = df,
+        table = TABLE_ERROR_LOGS,
+        schema_dic = schema_dic
     )
 
 def get_info(book_id_list, table=TABLE_DIM_BOOKS):
